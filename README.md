@@ -1,4 +1,4 @@
-This project aims to build a fully automated quantitative trading framework inspired by the work of Timothy DeLise (@jefferythewind). 
+This project aims to build a fully automated quantitative trading framework.
 
 The objective is to create a complete, self-contained system capable of collecting market data, processing signals, executing trades, and evaluating performance without manual intervention.
 
