@@ -1,4 +1,4 @@
-##HL-Rocket
+**HL-Rocket**
 
 This project aims to build a fully automated quantitative trading framework.
 
