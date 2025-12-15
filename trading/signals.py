@@ -12,8 +12,10 @@ def get_long_short_ids(n=3):
         df = pd.read_parquet("/tmp/meta_model.parquet")
         df["release_date"] = pd.to_datetime(df["release_date"])
 
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-        df_today = df[df["release_date"].dt.date == yesterday]
+        # use the line "yesterday" if you are testing the code during 12 am - 7 pm interval
+        # yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        today = datetime.now(timezone.utc).date()
+        df_today = df[df["release_date"].dt.date == today]
 
         if df_today.empty:
             raise RuntimeError("No predictions available for today")

@@ -29,6 +29,7 @@ if pk is None:
     raise RuntimeError("Missing HYPERLIQUID_PRIVATE_KEY")
 
 account = Account.from_key(pk)
+VAULT_ADDRESS = "0x9e72aabff75fe7c02cb12112c8ea8eb80b0b51b6"
 
 info = Info(BASE_URL)
 exchange = Exchange(account, BASE_URL)
@@ -38,9 +39,8 @@ exchange = Exchange(account, BASE_URL)
 # HELPERS
 # =====================
 def get_open_positions():
-    state = info.user_state(account.address)
+    state = info.user_state(VAULT_ADDRESS)
     return state.get("assetPositions", [])
-
 
 def close_position(symbol: str, size: float):
     is_long = size > 0
@@ -51,13 +51,15 @@ def close_position(symbol: str, size: float):
         return
 
     exchange.order(
-        name=symbol,
-        is_buy=not is_long,
-        sz=abs(size),
-        px=None,
-        order_type={"market": {}},
-        reduce_only=True,
-    )
+    name=symbol,
+    is_buy=not is_long,
+    sz=abs(size),
+    px=None,
+    order_type={"market": {}},
+    reduce_only=True,
+    vaultAddress=VAULT_ADDRESS,
+    )   
+
 
     print(f"{side} {symbol} | size={abs(size)}")
 
@@ -131,13 +133,15 @@ def open_position(symbol: str, usd: float, is_long: bool):
         return
 
     exchange.order(
-        name=symbol,
-        is_buy=is_long,
-        sz=size,
-        px=None,
-        order_type={"market": {}},
-        reduce_only=False,
+    name=symbol,
+    is_buy=is_long,
+    sz=size,
+    px=None,
+    order_type={"market": {}},
+    reduce_only=False,
+    vaultAddress=VAULT_ADDRESS,
     )
+
 
     print(f"{side} {symbol} | size={size} | est ${est_notional:.2f}")
 
