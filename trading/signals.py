@@ -2,8 +2,6 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from crowdcent_challenge import ChallengeClient
 
-from datetime import timedelta, timezone, datetime
-
 def get_long_short_ids(n=3):
     client = ChallengeClient(challenge_slug="hyperliquid-ranking")
     try:
