@@ -11,7 +11,7 @@ def get_long_short_ids(n=3):
         df["release_date"] = pd.to_datetime(df["release_date"])
 
         # use the line "yesterday" if you are testing the code during 12 am - 7 pm interval
-        # yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        #yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
         today = datetime.now(timezone.utc).date()
         df_today = df[df["release_date"].dt.date == today]
 
