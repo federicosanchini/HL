@@ -183,12 +183,12 @@ def execute_trades(
 
     print("\n--- OPENING LONG POSITIONS ---")
     for symbol in long_ids:
-        exchange.update_leverage(1, symbol)  
+        exchange.update_leverage(1, symbol, is_cross=False)  
         open_position(symbol, TARGET_USD, is_long=True)
 
     print("\n--- OPENING SHORT POSITIONS ---")
     for symbol in short_ids:
-        exchange.update_leverage(1, symbol) 
+        exchange.update_leverage(1, symbol, is_cross=False) 
         open_position(symbol, TARGET_USD, is_long=False)
 
 
