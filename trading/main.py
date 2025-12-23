@@ -7,7 +7,7 @@ def main():
     execute_trades(long_ids, short_ids)
     shutdown()
     os._exit(0)  # <-- TERMINA BRUTALMENTE (niente cleanup)
-
+    #ciao
 
 if __name__ == "__main__":
     main()
