@@ -1,5 +1,5 @@
 from signals import get_long_short_ids
-from trades import execute_trades
+from aws.aws_trades import execute_trades
 
 
 def lambda_handler(event, context):

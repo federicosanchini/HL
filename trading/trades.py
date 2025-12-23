@@ -79,6 +79,8 @@ def _get_mid(symbol: str) -> float | None:
 # =====================
 # TRADING
 # =====================
+
+'''
 def close_position(symbol: str, size: float):
     """
     size signed:
@@ -134,6 +136,8 @@ def close_positions_older_than(days: float):
             print(f"Found old position: {symbol} | size={size} | age={age_days:.1f} days")
             close_position(symbol, size)
 
+'''
+
 
 def open_position(symbol: str, usd: float, is_long: bool):
     """
@@ -177,9 +181,9 @@ def open_position(symbol: str, usd: float, is_long: bool):
 def execute_trades(
     long_ids: list[str],
     short_ids: list[str],
-    close_after_days: float = 29.9,
+    # close_after_days: float = 29.9,
 ):
-    close_positions_older_than(close_after_days)
+    # close_positions_older_than(close_after_days)
 
     print("\n--- OPENING LONG POSITIONS ---")
     for symbol in long_ids:
