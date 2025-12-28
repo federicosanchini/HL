@@ -1,0 +1,2 @@
+[console_scripts]
+crowdcent = crowdcent_challenge.cli:cli

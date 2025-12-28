@@ -1,0 +1,4 @@
+eth-account==0.13.7
+pandas==2.3.3
+crowdcent-challenge==0.1.15
+hyperliquid-python-sdk==0.21.0

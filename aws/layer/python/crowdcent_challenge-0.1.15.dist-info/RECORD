@@ -1,0 +1,17 @@
+../../bin/crowdcent,sha256=fPubzqqdpJSc2NalyAZ4isgIOph1-3NymIvINMgk_AY,273
+crowdcent_challenge-0.1.15.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+crowdcent_challenge-0.1.15.dist-info/METADATA,sha256=A-ntlQo3c9JttmmwzSWoyC2jBRGoyhUbxE_Q_7TEf0M,5634
+crowdcent_challenge-0.1.15.dist-info/RECORD,,
+crowdcent_challenge-0.1.15.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+crowdcent_challenge-0.1.15.dist-info/WHEEL,sha256=qtCwoSJWgHk21S1Kb4ihdzI2rlJ1ZKaIurTj_ngOhyQ,87
+crowdcent_challenge-0.1.15.dist-info/entry_points.txt,sha256=B068YncNgtmY-ES_nMcknfkpy_pordycNcDuaYd_d7w,58
+crowdcent_challenge-0.1.15.dist-info/licenses/LICENSE,sha256=Ld90pOqITqJzseKbbqc6gzu_J42om4dlQxmUG_dFb4Y,1070
+crowdcent_challenge/__init__.py,sha256=iRpBQz1S7H0HkKVz8-OMXtIuMoI0UOFtKZGKkB3uNJI,295
+crowdcent_challenge/__pycache__/__init__.cpython-311.pyc,,
+crowdcent_challenge/__pycache__/cli.cpython-311.pyc,,
+crowdcent_challenge/__pycache__/client.cpython-311.pyc,,
+crowdcent_challenge/__pycache__/scoring.cpython-311.pyc,,
+crowdcent_challenge/cli.py,sha256=KMQcphYCVEXov7GvS4R656sVzkWrq2ghbJs8PCiglGY,15928
+crowdcent_challenge/client.py,sha256=18rJl36anSzMrjKjc3bbvtVtVxSl9D6C5HJ9DtG2ju0,30102
+crowdcent_challenge/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+crowdcent_challenge/scoring.py,sha256=SeBxLoMMF41rvHxRStOzkzjIv-h2Prbo4NSBDWda2oA,15499
