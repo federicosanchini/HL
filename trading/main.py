@@ -3,6 +3,8 @@ from signals import get_long_short_ids
 from trades import execute_trades, shutdown
 from close_trades import close_net_in_time_window  # <-- importa la funzione di close
 import os
+import time
+
 
 # =====================
 # CONFIG CLOSE WINDOW
@@ -15,11 +17,7 @@ CLOSE_CLAMP = True
 
 def main():
     try:
-        # 1) Apri/gestisci trade come fai già
-        long_ids, short_ids = get_long_short_ids(n=3)
-        execute_trades(long_ids, short_ids)
-
-        # 2) Chiudi le size delle coin tradeate nella finestra temporale
+        # 1) Chiudi le size delle coin tradeate nella finestra temporale
         close_net_in_time_window(
             min_age=CLOSE_MIN_AGE,
             max_age=CLOSE_MAX_AGE,
@@ -27,7 +25,13 @@ def main():
             clamp_to_position=CLOSE_CLAMP,
         )
 
+        # 2) Apri/gestisci trade come fai già
+        long_ids, short_ids = get_long_short_ids(n=3)
+        execute_trades(long_ids, short_ids)
+
     finally:
+        time.sleep(10)
+
         # 3) Shutdown sempre (anche se sopra va in errore)
         shutdown()
 
