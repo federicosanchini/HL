@@ -18,12 +18,14 @@ CLOSE_CLAMP = True
 def main():
     try:
         # 1) Chiudi le size delle coin tradeate nella finestra temporale
+        '''
         close_net_in_time_window(
             min_age=CLOSE_MIN_AGE,
             max_age=CLOSE_MAX_AGE,
             unit=CLOSE_UNIT,
             clamp_to_position=CLOSE_CLAMP,
         )
+        '''
 
         # 2) Apri/gestisci trade come fai già
         long_ids, short_ids = get_long_short_ids(n=3)

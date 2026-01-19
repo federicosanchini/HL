@@ -7,3 +7,110 @@
 2026-01-01 19:02:07,999 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
 /opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
   warnings.warn('resource_tracker: There appear to be %d '
+2026-01-02 19:02:03,651 - INFO - Websocket connected
+2026-01-02 19:02:06,588 - INFO - Websocket connected
+2026-01-02 19:02:08,330 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-02 19:02:08,331 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+[OK] No fills in window 2025-12-03T15:38:08.060433+00:00 -> 2025-12-03T20:26:08.060433+00:00.
+Downloading meta_model.parquet:   0%|          | 0.00/585k [00:00<?, ?B/s]Downloading meta_model.parquet:   4%|▍         | 24.6k/585k [00:00<00:06, 88.8kB/s]Downloading meta_model.parquet:  13%|█▎        | 73.7k/585k [00:00<00:06, 78.6kB/s]Downloading meta_model.parquet:  18%|█▊        | 106k/585k [00:03<00:18, 25.7kB/s] Downloading meta_model.parquet:  21%|██        | 123k/585k [00:03<00:15, 28.9kB/s]Downloading meta_model.parquet:  24%|██▍       | 139k/585k [00:04<00:13, 32.4kB/s]Downloading meta_model.parquet:  39%|███▉      | 229k/585k [00:04<00:04, 77.6kB/s]Downloading meta_model.parquet:  52%|█████▏    | 303k/585k [00:04<00:02, 109kB/s] Downloading meta_model.parquet:  66%|██████▌   | 385k/585k [00:05<00:01, 141kB/s]Downloading meta_model.parquet:  78%|███████▊  | 459k/585k [00:05<00:00, 129kB/s]Downloading meta_model.parquet:  92%|█████████▏| 541k/585k [00:06<00:00, 155kB/s]Downloading meta_model.parquet:  99%|█████████▉| 582k/585k [00:06<00:00, 148kB/s]Downloading meta_model.parquet: 100%|██████████| 585k/585k [00:06<00:00, 92.0kB/s]
+2026-01-02 19:02:22,613 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-03 19:02:03,995 - INFO - Websocket connected
+2026-01-03 19:02:06,804 - INFO - Websocket connected
+2026-01-03 19:02:09,429 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-03 19:02:09,430 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+[OK] No fills in window 2025-12-04T15:38:09.198130+00:00 -> 2025-12-04T20:26:09.198130+00:00.
+Downloading meta_model.parquet:   0%|          | 0.00/588k [00:00<?, ?B/s]Downloading meta_model.parquet:  14%|█▍        | 81.9k/588k [00:00<00:00, 592kB/s]Downloading meta_model.parquet:  32%|███▏      | 188k/588k [00:00<00:00, 818kB/s] Downloading meta_model.parquet:  68%|██████▊   | 401k/588k [00:00<00:00, 1.36MB/s]Downloading meta_model.parquet: 100%|██████████| 588k/588k [00:00<00:00, 1.63MB/s]
+2026-01-03 19:02:17,277 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-05 19:02:03,314 - INFO - Websocket connected
+2026-01-05 19:02:05,943 - INFO - Websocket connected
+2026-01-05 19:02:09,475 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-05 19:02:09,475 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+[OK] No fills in window 2025-12-06T15:38:09.102279+00:00 -> 2025-12-06T20:26:09.102279+00:00.
+Downloading meta_model.parquet:   0%|          | 0.00/594k [00:00<?, ?B/s]Downloading meta_model.parquet:  10%|▉         | 57.3k/594k [00:00<00:02, 258kB/s]Downloading meta_model.parquet:  23%|██▎       | 139k/594k [00:00<00:00, 470kB/s] Downloading meta_model.parquet:  36%|███▌      | 213k/594k [00:00<00:00, 563kB/s]Downloading meta_model.parquet:  47%|████▋     | 279k/594k [00:00<00:00, 588kB/s]Downloading meta_model.parquet:  58%|█████▊    | 344k/594k [00:00<00:00, 602kB/s]Downloading meta_model.parquet:  70%|███████   | 418k/594k [00:00<00:00, 622kB/s]Downloading meta_model.parquet:  83%|████████▎ | 492k/594k [00:00<00:00, 647kB/s]Downloading meta_model.parquet:  95%|█████████▌| 565k/594k [00:00<00:00, 666kB/s]Downloading meta_model.parquet: 100%|██████████| 594k/594k [00:00<00:00, 621kB/s]
+2026-01-05 19:02:18,598 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-08 19:02:02,969 - INFO - Websocket connected
+2026-01-08 19:02:05,600 - INFO - Websocket connected
+2026-01-08 19:02:07,738 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-08 19:02:07,738 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/602k [00:00<?, ?B/s]Downloading meta_model.parquet:  14%|█▎        | 81.9k/602k [00:00<00:00, 590kB/s]Downloading meta_model.parquet:  31%|███▏      | 188k/602k [00:00<00:00, 821kB/s] Downloading meta_model.parquet:  67%|██████▋   | 401k/602k [00:00<00:00, 1.35MB/s]Downloading meta_model.parquet: 100%|██████████| 602k/602k [00:00<00:00, 1.70MB/s]
+2026-01-08 19:02:15,938 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-11 19:04:48,721 - INFO - Websocket connected
+2026-01-11 19:04:51,796 - INFO - Websocket connected
+2026-01-11 19:04:54,114 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-11 19:04:54,114 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+2026-01-11 19:05:02,025 - INFO - Websocket connected
+Downloading meta_model.parquet:   0%|          | 0.00/610k [00:00<?, ?B/s]Downloading meta_model.parquet:  11%|█         | 65.5k/610k [00:00<00:02, 256kB/s]Downloading meta_model.parquet:  28%|██▊       | 172k/610k [00:00<00:01, 426kB/s] Downloading meta_model.parquet:  54%|█████▎    | 328k/610k [00:00<00:00, 693kB/s]Downloading meta_model.parquet:  82%|████████▏ | 500k/610k [00:00<00:00, 806kB/s]Downloading meta_model.parquet: 100%|██████████| 610k/610k [00:00<00:00, 820kB/s]
+2026-01-11 19:05:03,776 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+2026-01-11 19:05:05,212 - INFO - Websocket connected
+2026-01-11 19:05:08,059 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-11 19:05:08,059 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/610k [00:00<?, ?B/s]Downloading meta_model.parquet:  12%|█▏        | 73.7k/610k [00:00<00:01, 441kB/s]Downloading meta_model.parquet:  30%|██▉       | 180k/610k [00:00<00:00, 715kB/s] Downloading meta_model.parquet:  63%|██████▎   | 385k/610k [00:00<00:00, 1.23MB/s]Downloading meta_model.parquet: 100%|██████████| 610k/610k [00:00<00:00, 1.57MB/s]
+2026-01-11 19:05:09,818 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-12 19:02:05,209 - INFO - Websocket connected
+2026-01-12 19:02:08,173 - INFO - Websocket connected
+2026-01-12 19:02:09,893 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-12 19:02:09,893 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/613k [00:00<?, ?B/s]Downloading meta_model.parquet:  12%|█▏        | 73.7k/613k [00:00<00:01, 477kB/s]Downloading meta_model.parquet:  27%|██▋       | 164k/613k [00:00<00:00, 651kB/s] Downloading meta_model.parquet:  55%|█████▍    | 336k/613k [00:00<00:00, 1.06MB/s]Downloading meta_model.parquet:  88%|████████▊ | 541k/613k [00:00<00:00, 1.41MB/s]Downloading meta_model.parquet: 100%|██████████| 613k/613k [00:00<00:00, 1.30MB/s]
+2026-01-12 19:02:19,321 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-13 19:02:02,287 - INFO - Websocket connected
+2026-01-13 19:02:04,430 - INFO - Websocket connected
+2026-01-13 19:02:06,574 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-13 19:02:06,574 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/616k [00:00<?, ?B/s]Downloading meta_model.parquet:  11%|█         | 65.5k/616k [00:00<00:01, 404kB/s]Downloading meta_model.parquet:  28%|██▊       | 172k/616k [00:00<00:00, 700kB/s] Downloading meta_model.parquet:  41%|████      | 254k/616k [00:00<00:00, 739kB/s]Downloading meta_model.parquet:  55%|█████▍    | 336k/616k [00:00<00:00, 763kB/s]Downloading meta_model.parquet:  68%|██████▊   | 418k/616k [00:00<00:00, 778kB/s]Downloading meta_model.parquet:  81%|████████  | 500k/616k [00:00<00:00, 781kB/s]Downloading meta_model.parquet:  96%|█████████▌| 590k/616k [00:00<00:00, 809kB/s]Downloading meta_model.parquet: 100%|██████████| 616k/616k [00:00<00:00, 703kB/s]
+2026-01-13 19:02:16,606 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-14 19:02:03,493 - INFO - Websocket connected
+2026-01-14 19:02:06,233 - INFO - Websocket connected
+2026-01-14 19:02:08,809 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-14 19:02:08,809 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/619k [00:00<?, ?B/s]Downloading meta_model.parquet:  12%|█▏        | 73.7k/619k [00:00<00:01, 534kB/s]Downloading meta_model.parquet:  29%|██▉       | 180k/619k [00:00<00:00, 796kB/s] Downloading meta_model.parquet:  65%|██████▍   | 401k/619k [00:00<00:00, 1.34MB/s]Downloading meta_model.parquet: 100%|██████████| 619k/619k [00:00<00:00, 1.74MB/s]
+2026-01-14 19:02:17,531 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-15 19:02:03,062 - INFO - Websocket connected
+2026-01-15 19:02:05,066 - INFO - Websocket connected
+2026-01-15 19:02:07,615 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-15 19:02:07,616 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/622k [00:00<?, ?B/s]Downloading meta_model.parquet:  13%|█▎        | 81.9k/622k [00:00<00:01, 518kB/s]Downloading meta_model.parquet:  30%|███       | 188k/622k [00:00<00:00, 741kB/s] Downloading meta_model.parquet:  67%|██████▋   | 418k/622k [00:00<00:00, 1.31MB/s]Downloading meta_model.parquet: 100%|██████████| 622k/622k [00:00<00:00, 1.59MB/s]
+2026-01-15 19:02:17,045 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-16 19:02:03,431 - INFO - Websocket connected
+2026-01-16 19:02:06,378 - INFO - Websocket connected
+2026-01-16 19:02:08,759 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-16 19:02:08,759 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/625k [00:00<?, ?B/s]Downloading meta_model.parquet:  13%|█▎        | 81.9k/625k [00:00<00:01, 481kB/s]Downloading meta_model.parquet:  30%|███       | 188k/625k [00:00<00:00, 744kB/s] Downloading meta_model.parquet:  60%|██████    | 377k/625k [00:00<00:00, 1.19MB/s]Downloading meta_model.parquet:  94%|█████████▍| 590k/625k [00:00<00:00, 1.52MB/s]Downloading meta_model.parquet: 100%|██████████| 625k/625k [00:00<00:00, 1.29MB/s]
+2026-01-16 19:02:18,298 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-17 19:02:03,368 - INFO - Websocket connected
+2026-01-17 19:02:06,035 - INFO - Websocket connected
+2026-01-17 19:02:07,985 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-17 19:02:07,985 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/628k [00:00<?, ?B/s]Downloading meta_model.parquet:  12%|█▏        | 73.7k/628k [00:00<00:01, 522kB/s]Downloading meta_model.parquet:  29%|██▊       | 180k/628k [00:00<00:00, 783kB/s] Downloading meta_model.parquet:  65%|██████▌   | 410k/628k [00:00<00:00, 1.38MB/s]Downloading meta_model.parquet: 100%|██████████| 628k/628k [00:00<00:00, 1.75MB/s]
+2026-01-17 19:02:16,722 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+2026-01-18 19:02:02,388 - INFO - Websocket connected
+2026-01-18 19:02:04,635 - INFO - Websocket connected
+2026-01-18 19:02:06,460 - INFO - ChallengeClient initialized for 'hyperliquid-ranking' at URL: https://crowdcent.com/api
+2026-01-18 19:02:06,460 - INFO - Downloading consolidated meta model for challenge 'hyperliquid-ranking' to /tmp/meta_model.parquet
+Downloading meta_model.parquet:   0%|          | 0.00/631k [00:00<?, ?B/s]Downloading meta_model.parquet:  12%|█▏        | 73.7k/631k [00:00<00:01, 479kB/s]Downloading meta_model.parquet:  29%|██▊       | 180k/631k [00:00<00:00, 754kB/s] Downloading meta_model.parquet:  65%|██████▍   | 410k/631k [00:00<00:00, 1.37MB/s]Downloading meta_model.parquet: 100%|██████████| 631k/631k [00:00<00:00, 1.73MB/s]
+2026-01-18 19:02:29,603 - INFO - Successfully downloaded consolidated meta model to /tmp/meta_model.parquet
+/opt/miniconda3/envs/defi/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

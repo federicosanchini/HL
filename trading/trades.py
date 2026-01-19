@@ -16,7 +16,7 @@ from hyperliquid.utils import constants
 # =====================
 VAULT_ADDRESS = "0x9e72aabff75fe7c02cb12112c8ea8eb80b0b51b6"
 
-TARGET_USD = 10.0
+TARGET_USD = 10.05
 MIN_NOTIONAL = 10.0
 
 # Metti False per tradare davvero
