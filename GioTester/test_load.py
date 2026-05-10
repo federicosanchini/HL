@@ -9,9 +9,8 @@ from typing import List
 
 import pandas as pd
 
-from config import DataConfig
-from data_loader import DataLoader, TICKER_SET
-from source_comparison import compare_sources
+from src.config import DataConfig
+from src.data_loader import DataLoader, TICKER_SET
 
 DATA = Path(__file__).parent.parent / "data"
 
@@ -166,10 +165,4 @@ if __name__ == "__main__":
         run_pipeline(name, cfg)
         results[name] = DataLoader(cfg).load_predictions()
 
-    compare_sources(
-        cc=results["crowdcent"],
-        nm=results["numerai"],
-        n_long=CONFIGS["crowdcent"].n_long,
-        n_short=CONFIGS["crowdcent"].n_short,
-    )
     print("\nAll pipelines passed.")

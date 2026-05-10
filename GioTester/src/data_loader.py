@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from config import DataConfig
+from .config import DataConfig
 
 # ————————————————————————————————————————————————————————————————————————— #
 # Hyperliquid universe
