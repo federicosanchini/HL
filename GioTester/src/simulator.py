@@ -1,14 +1,3 @@
-"""
-Hourly event-loop backtester for HL perps.
-
-Confidence: MEDIUM
-Uncertainty:
-  - liquidation fee: 1% of remaining margin moved to insurance fund (per spec interpretation)
-  - taker fee applied on every fill: open, close, and liquidation
-  - liquidation detection uses last-observed mark; no intra-bar high/low cross
-Resolves if: HL liquidation fee % confirmed; intra-bar fills made explicit.
-"""
-
 from __future__ import annotations
 
 import math
@@ -75,16 +64,20 @@ def _prepare_sim_data(
     def _idx_map(times: pd.Series) -> np.ndarray:
         return times.map(ts_to_idx).fillna(-1).astype(np.int64).to_numpy()
 
+    n_perps = len(perps)
+
     # OHLC dense
     ohlc_d: Dict[str, np.ndarray] = {p: np.full((n_bars, 4), np.nan) for p in perps}
-    for perp, g in market.ohlc.groupby("perp", sort=False):
+    for perp, g in tqdm(market.ohlc.groupby("perp", sort=False),
+                        desc="OHLC arrays", total=n_perps, leave=False):
         idx = _idx_map(g["time"])
         valid = idx >= 0
         sub = g[["open", "high", "low", "close"]].to_numpy()
         ohlc_d[perp][idx[valid]] = sub[valid]
 
     fund_d: Dict[str, np.ndarray] = {p: np.full(n_bars, np.nan) for p in perps}
-    for perp, g in market.funding.groupby("perp", sort=False):
+    for perp, g in tqdm(market.funding.groupby("perp", sort=False),
+                        desc="funding arrays", total=n_perps, leave=False):
         if perp not in fund_d:
             continue
         idx = _idx_map(g["time"])
@@ -92,7 +85,8 @@ def _prepare_sim_data(
         fund_d[perp][idx[valid]] = g["fundingRate"].to_numpy()[valid]
 
     orac_d: Dict[str, np.ndarray] = {p: np.full(n_bars, np.nan) for p in perps}
-    for perp, g in market.oracle.groupby("perp", sort=False):
+    for perp, g in tqdm(market.oracle.groupby("perp", sort=False),
+                        desc="oracle arrays", total=n_perps, leave=False):
         if perp not in orac_d:
             continue
         idx = _idx_map(g["time"])
@@ -105,7 +99,9 @@ def _prepare_sim_data(
         ranks_raw["release_date"], utc=True, errors="coerce"
     ).dt.floor("D")
     ranks_raw = ranks_raw.dropna(subset=["release_date", "id"])
-    ranks_raw["perp"] = ranks_raw["id"].map(DataLoader._normalize_symbol)  # staticmethod
+    ranks_raw["perp"] = ranks_raw["id"].map(
+        DataLoader._normalize_symbol
+    )  # staticmethod
     ranks_raw = ranks_raw.dropna(subset=["perp"])
     ranks_raw = ranks_raw[ranks_raw["perp"].isin(set(perps))]
     for col in ("pred_10d", "pred_30d"):

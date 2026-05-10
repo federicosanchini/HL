@@ -36,7 +36,6 @@ class DataConfig:
     entry_hour_utc: int = 0
     max_entry_delay_hours: int = 23
     execution_price_col: str = "open"
-    notional_per_trade: float = 10.0
 
 
 @dataclass
@@ -45,7 +44,6 @@ class BacktestConfig:
     initial_equity: float = 2000.0
     n: int = 3                       # top-N long, bottom-N short
     leverage: float = 1.0
-    notional_per_trade: float = 10.0 # USD per leg at entry
     taker_fee_bps: float = 4.5       # 0.045%
     liquidation_fee_frac: float = 0.01   # 1% of remaining margin → insurance
     min_notional_usd: float = 10.0

@@ -1,17 +1,3 @@
-"""
-Position model for HyperLiquid perpetual futures (isolated margin).
-
-Confidence: HIGH
-Uncertainty:
-  - liquidation fee fraction: HL docs cite ~1% of remaining margin → insurance fund.
-    Implemented in simulator.py, not here.
-  - liquidation_price formula uses textbook isolated equity-vs-MM derivation:
-        equity_at_p = initial_margin + side*qty*(p - entry)
-        liquidate when equity_at_p <= mm_frac * qty * |p|
-    Treated with mm_frac = 1 / (2 * leverage) per project spec.
-Resolves if: HL "Liquidations" doc reviewed; can swap formula in-place.
-"""
-
 from __future__ import annotations
 
 import math

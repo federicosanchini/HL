@@ -1,14 +1,3 @@
-"""
-HODL strategies: at every ranks release_date open long top-N + short bottom-N,
-hold for `expiry_days * 24` bars, then close. No SL/TP.
-
-Confidence: MEDIUM
-Uncertainty:
-  - signal column choice tied to expiry: pred_10d for HODL_10, pred_30d for HODL_30
-  - tie-handling when multiple perps share the same prediction (stable order via sort key)
-Resolves if: spec for tie-break / signal-column mapping pinned by user.
-"""
-
 from __future__ import annotations
 
 import math
@@ -34,7 +23,8 @@ class Strategy:
         expiry_days: int,
         n: int = 3,
         leverage: float = 1.0,
-        notional_per_trade: float = 10.0,
+        notional_long: float = 10.0,
+        notional_short: float = 10.0,
         taker_fee_bps: float = 4.5,
         min_notional_usd: float = 10.0,
         blackout_days_end: int = 50,
@@ -44,7 +34,8 @@ class Strategy:
         self.expiry_bars = int(expiry_days) * int(bars_per_day)
         self.n = int(n)
         self.leverage = float(leverage)
-        self.notional_per_trade = float(notional_per_trade)
+        self.notional_long = float(notional_long)
+        self.notional_short = float(notional_short)
         self.taker_fee_bps = float(taker_fee_bps)
         self.min_notional_usd = float(min_notional_usd)
         self.blackout_bars_end = int(blackout_days_end) * int(bars_per_day)
@@ -169,25 +160,25 @@ class HODL(Strategy):
 
         orders: List[NewOrder] = []
         for perp, _ in longs:
-            if self.notional_per_trade < self.min_notional_usd:
+            if self.notional_long < self.min_notional_usd:
                 continue
             orders.append(
                 NewOrder(
                     perp=perp,
                     side=+1,
-                    notional=self.notional_per_trade,
+                    notional=self.notional_long,
                     leverage=self.leverage,
                     expiry_bars=self.expiry_bars,
                 )
             )
         for perp, _ in shorts:
-            if self.notional_per_trade < self.min_notional_usd:
+            if self.notional_short < self.min_notional_usd:
                 continue
             orders.append(
                 NewOrder(
                     perp=perp,
                     side=-1,
-                    notional=self.notional_per_trade,
+                    notional=self.notional_short,
                     leverage=self.leverage,
                     expiry_bars=self.expiry_bars,
                 )
@@ -209,3 +200,65 @@ class HODL_30(HODL):
     def __init__(self, **kw) -> None:
         kw.setdefault("expiry_days", 30)
         super().__init__(**kw)
+
+
+class HODL_combined(HODL):
+    """Long perps that rank top-N in BOTH pred_10d and pred_30d; short bottom-N in both.
+    n_long / n_short control the intersection pool size per signal independently.
+    """
+
+    name = "HODL_combined"
+
+    def __init__(self, n_long: int = 3, n_short: int = 3, **kw) -> None:
+        kw.setdefault("expiry_days", 15)
+        kw.setdefault("n", max(n_long, n_short))
+        super().__init__(**kw)
+        self.n_long = int(n_long)
+        self.n_short = int(n_short)
+
+    def open_positions(self, bucket: StateBucket) -> List[NewOrder]:
+        ms = bucket.market_state
+        if not ms.is_release_bar:
+            return []
+        if not ms.current_ranks_row:
+            return []
+        if not self._entry_gate(bucket):
+            return []
+
+        cands: List[Tuple[str, float, float]] = []
+        for perp, preds in ms.current_ranks_row.items():
+            if perp not in ms.ohlc_row:
+                continue
+            p10, p30 = preds
+            if not (math.isfinite(p10) and math.isfinite(p30)):
+                continue
+            cands.append((perp, p10, p30))
+
+        if len(cands) < 2:
+            return []
+
+        by_10 = sorted(cands, key=lambda t: (t[1], t[0]))
+        by_30 = sorted(cands, key=lambda t: (t[2], t[0]))
+
+        top_10 = {p for p, _, _ in by_10[-self.n_long:]}
+        top_30 = {p for p, _, _ in by_30[-self.n_long:]}
+        long_perps = sorted(top_10 & top_30)
+
+        bot_10 = {p for p, _, _ in by_10[: self.n_short]}
+        bot_30 = {p for p, _, _ in by_30[: self.n_short]}
+        short_perps = sorted((bot_10 & bot_30) - set(long_perps))
+
+        orders: List[NewOrder] = []
+        for perp in long_perps:
+            if self.notional_long >= self.min_notional_usd:
+                orders.append(
+                    NewOrder(perp=perp, side=+1, notional=self.notional_long,
+                             leverage=self.leverage, expiry_bars=self.expiry_bars)
+                )
+        for perp in short_perps:
+            if self.notional_short >= self.min_notional_usd:
+                orders.append(
+                    NewOrder(perp=perp, side=-1, notional=self.notional_short,
+                             leverage=self.leverage, expiry_bars=self.expiry_bars)
+                )
+        return orders
