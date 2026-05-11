@@ -211,9 +211,20 @@ def _execute_open(
     ts: pd.Timestamp,
     next_id: int,
     bucket: StateBucket,
+    ohlc_row: Optional[np.ndarray] = None,
 ) -> Optional[Position]:
     if not (math.isfinite(fill_px) and fill_px > 0):
         return None
+    # limit order: check if bar's high/low reaches the limit
+    if order.limit_price is not None:
+        lp = order.limit_price
+        if ohlc_row is None or not (math.isfinite(lp) and lp > 0):
+            return None
+        if order.side == 1 and ohlc_row[2] > lp:   # long: low must reach limit
+            return None
+        if order.side == -1 and ohlc_row[1] < lp:  # short: high must reach limit
+            return None
+        fill_px = lp
     notional = order.notional
     qty = notional / fill_px
     margin = notional / order.leverage
@@ -397,7 +408,8 @@ def run_backtest(
                 if order.notional < strategy.min_notional_usd:
                     continue
                 placed = _execute_open(
-                    order, float(row[0]), fee_bps, ms.timestamp, next_id, bucket
+                    order, float(row[0]), fee_bps, ms.timestamp, next_id, bucket,
+                    ohlc_row=row,
                 )
                 if placed is not None:
                     next_id += 1
@@ -464,3 +476,30 @@ def run_backtest(
         n_closed=int(n_closed),
         n_liquidated=int(n_liq),
     )
+
+
+def log_results(result: SimResult, path: str) -> None:
+    """Serialize SimResult to JSON for GioVisualizer. Only includes perps that traded."""
+    import json
+    from pathlib import Path
+
+    traded = set(result.metrics_per_perp.keys())
+    payload = {
+        "strategy": result.strategy_name,
+        "timeline": [ts.isoformat() for ts in result.timeline],
+        "total_equity": result.total_equity.tolist(),
+        "per_perp_equity": {
+            p: arr.tolist()
+            for p, arr in result.per_perp_equity.items()
+            if p in traded
+        },
+        "metrics_total": result.metrics_total,
+        "metrics_per_perp": result.metrics_per_perp,
+        "n_opened": result.n_opened,
+        "n_closed": result.n_closed,
+        "n_liquidated": result.n_liquidated,
+    }
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, separators=(",", ":"))

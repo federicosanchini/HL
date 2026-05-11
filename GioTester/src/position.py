@@ -90,6 +90,7 @@ class NewOrder:
     notional: float
     leverage: float
     expiry_bars: int
+    limit_price: Optional[float] = None  # None = market; set = limit (checked vs bar high/low)
 
 
 # Legacy stub kept for back-compat; real strategies live in strategies.py.
