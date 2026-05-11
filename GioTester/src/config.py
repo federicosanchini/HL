@@ -41,12 +41,12 @@ class DataConfig:
 @dataclass
 class BacktestConfig:
     """Runtime knobs for the hourly simulator."""
+
     initial_equity: float = 2000.0
-    n: int = 3                       # top-N long, bottom-N short
+    n: int = 3  # top-N long, bottom-N short
     leverage: float = 1.0
-    taker_fee_bps: float = 4.5       # 0.045%
-    liquidation_fee_frac: float = 0.01   # 1% of remaining margin → insurance
+    taker_fee_bps: float = 4.5  # 0.045%
     min_notional_usd: float = 10.0
-    blackout_days_end: int = 50      # block entries in last N days
+    blackout_days_end: int = 0  # block entries in last N days
     bars_per_day: int = 24
     annualization: int = 8760

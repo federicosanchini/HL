@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -201,6 +201,28 @@ TICKERS = [
 ]
 TICKER_SET = set(TICKERS)
 CANONICAL_TICKER_BY_UPPER = {sym.upper(): sym for sym in TICKERS}
+
+# Per-asset maintenance margin rate = 1 / (2 * max_leverage_tier1).
+# Source: HL margin-tiers doc (small-notional tier, which covers all positions in scope).
+# Default 0.05 = 10x tier, covers most mid-cap alts not explicitly listed.
+MM_RATE_BY_PERP: Dict[str, float] = {
+    # 40x tier → 0.0125
+    "BTC": 0.0125,
+    # 25x tier → 0.020
+    "ETH": 0.020,
+    # 20x tier → 0.025
+    "SOL": 0.025, "BNB": 0.025, "XRP": 0.025, "ADA": 0.025, "DOGE": 0.025,
+    "DOT": 0.025, "AVAX": 0.025, "LINK": 0.025, "LTC": 0.025, "BCH": 0.025,
+    "NEAR": 0.025, "TRX": 0.025, "TON": 0.025, "SUI": 0.025, "APT": 0.025,
+    "ARB": 0.025, "OP": 0.025, "ATOM": 0.025, "HYPE": 0.025,
+}
+
+
+def mm_rate_for(perp: str) -> float:
+    """Return maintenance margin rate for perp. Defaults to 0.05 (10x tier)."""
+    return MM_RATE_BY_PERP.get(perp, 0.05)
+
+
 SYMBOL_ALIASES = {
     "PEPE": "kPEPE",
     "1000PEPE": "kPEPE",
@@ -253,8 +275,6 @@ class DataLoader:
         self.cfg = cfg
         # Populated by create_daily_signals; read by backtester for trade-coverage metrics.
         self.daily_signal_counts: Dict[pd.Timestamp, int] = {}
-        # Populated by build_trade_schedule; read by backtester for skip diagnostics.
-        self.skipped_signals: List[dict] = []
 
     # ———————————————————————————————————————————————————————————————— #
     # Private helpers
@@ -605,6 +625,9 @@ class DataLoader:
         for col in ["open", "high", "low", "close"]:
             if col in ohlc.columns:
                 ohlc[col] = pd.to_numeric(ohlc[col], errors="coerce")
+        # fundingRate at timestamp T = rate settled AT hour T (HL fundingHistory API
+        # convention). Simulator applies it to positions open during bar T. One-bar shift
+        # would occur only if T meant "upcoming hour" — HL API confirms it means "paid now".
         funding["fundingRate"] = pd.to_numeric(funding["fundingRate"], errors="coerce")
         oracle["oraclePx"] = pd.to_numeric(oracle["oraclePx"], errors="coerce")
 
@@ -714,145 +737,3 @@ class DataLoader:
             return pd.DataFrame(columns=cols)
         return pd.concat(rows, ignore_index=True)
 
-    # ———————————————————————————————————————————————————————————————— #
-    # build_trade_schedule
-    # ———————————————————————————————————————————————————————————————— #
-
-    def build_trade_schedule(
-        self, signals: pd.DataFrame, ohlc: pd.DataFrame
-    ) -> pd.DataFrame:
-        """Resolve each daily signal to a concrete execution candle and price.
-
-        For each signal row, searches the OHLC data for the first valid bar
-        within the entry window [signal_date + entry_hour_utc,
-        signal_date + entry_hour_utc + max_entry_delay_hours]. Signals with no
-        matching candle or invalid price are recorded in self.skipped_signals.
-        Populates self.skipped_signals.
-
-        Args:
-            signals: DataFrame returned by create_daily_signals.
-                     Must contain: signal_date (Timestamp), symbol, side, prediction.
-            ohlc:    OHLC DataFrame from MarketData; must contain the column
-                     named by cfg.execution_price_col.
-
-        Returns:
-            DataFrame[time, signal_date, symbol, side, prediction, price, notional]
-            sorted by (time, symbol, side).
-
-        Raises:
-            ValueError: execution_price_col not found in ohlc, or no trades
-                        could be scheduled after filtering.
-        """
-        schedule_cols = [
-            "time",
-            "signal_date",
-            "symbol",
-            "side",
-            "prediction",
-            "price",
-            "notional",
-        ]
-        self.skipped_signals = []
-
-        if signals.empty:
-            return pd.DataFrame(columns=schedule_cols)
-
-        price_col = self.cfg.execution_price_col
-        if price_col not in ohlc.columns:
-            raise ValueError(f"execution_price_col={price_col!r} not in OHLC columns.")
-
-        ohlc_by_symbol = {sym: g.sort_values("time") for sym, g in ohlc.groupby("perp")}
-        scheduled: List[dict] = []
-
-        for row in signals.itertuples(index=False):
-            start = row.signal_date + pd.Timedelta(hours=self.cfg.entry_hour_utc)
-            end = start + pd.Timedelta(hours=self.cfg.max_entry_delay_hours)
-
-            g = ohlc_by_symbol.get(row.symbol)
-            if g is None or g.empty:
-                self.skipped_signals.append(
-                    {
-                        "signal_date": row.signal_date,
-                        "symbol": row.symbol,
-                        "side": row.side,
-                        "prediction": row.prediction,
-                        "reason": "symbol_missing_from_ohlc",
-                    }
-                )
-                continue
-
-            candidates = g[(g["time"] >= start) & (g["time"] <= end)]
-            if candidates.empty:
-                self.skipped_signals.append(
-                    {
-                        "signal_date": row.signal_date,
-                        "symbol": row.symbol,
-                        "side": row.side,
-                        "prediction": row.prediction,
-                        "reason": "no_price_inside_entry_window",
-                    }
-                )
-                continue
-
-            price = float(candidates.iloc[0][price_col])
-            if not np.isfinite(price) or price <= 0:
-                self.skipped_signals.append(
-                    {
-                        "signal_date": row.signal_date,
-                        "symbol": row.symbol,
-                        "side": row.side,
-                        "prediction": row.prediction,
-                        "reason": "invalid_execution_price",
-                    }
-                )
-                continue
-
-            scheduled.append(
-                {
-                    "time": candidates.iloc[0]["time"],
-                    "signal_date": row.signal_date,
-                    "symbol": row.symbol,
-                    "side": int(row.side),
-                    "prediction": float(row.prediction),
-                    "price": price,
-                    "notional": float(self.cfg.notional_per_trade),
-                }
-            )
-
-        if not scheduled:
-            raise ValueError(
-                "No trades could be scheduled. "
-                "Check date overlap between predictions and OHLC data."
-            )
-
-        schedule = (
-            pd.DataFrame(scheduled)
-            .sort_values(["time", "symbol", "side"])
-            .reset_index(drop=True)
-        )
-        return schedule[schedule_cols]
-
-    # ———————————————————————————————————————————————————————————————— #
-    # load_all — convenience chain
-    # ———————————————————————————————————————————————————————————————— #
-
-    def load_all(
-        self,
-    ) -> Tuple[PredictionLoadResult, MarketData, pd.DataFrame, pd.DataFrame]:
-        """Run the full data loading pipeline in sequence.
-
-        Chains load_predictions -> load_market_data -> create_daily_signals
-        -> build_trade_schedule, passing outputs forward as inputs.
-
-        Returns:
-            Tuple of:
-                [0] PredictionLoadResult  (ranks DataFrame + metadata dict)
-                [1] MarketData            (ohlc, funding, oracle DataFrames)
-                [2] signals DataFrame     (daily long/short signal table)
-                [3] schedule DataFrame    (trade schedule with execution prices)
-        """
-        pred_result = self.load_predictions()
-        market = self.load_market_data(pred_result.metadata)
-        signals = self.create_daily_signals(pred_result.ranks)
-        schedule = self.build_trade_schedule(signals, market.ohlc)
-        return pred_result, market, signals, schedule

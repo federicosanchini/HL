@@ -1,5 +1,5 @@
 """
-Backtester entry-point. Runs HODL_10 then gap_HODL10, prints metric tables.
+Backtester entry-point. Runs HODL10_reset, HODL30_reset, gap_HODL10, prints metric tables.
 
 Confidence: HIGH (orchestration only)
 """
@@ -13,17 +13,14 @@ from pathlib import Path
 from src.config import BacktestConfig, DataConfig  # noqa: E402
 from src.data_loader import DataLoader  # noqa: E402
 from src.simulator import run_backtest, log_results  # noqa: E402
-from src.strategies import HODL_10, HODL_30, HODL_combined, gap_HODL10  # noqa: E402
+import src.strategies as strat
 
 # ——— constants ———
 INITIAL_EQUITY = 2000.0
-N = 2
-N_long = 2
-N_short = 2
-EXPIRY_DAYS = 20
+N = 3
 LEVERAGE = 1.0
-NOTIONAL_LONG = 11.0
-NOTIONAL_SHORT = 11.0
+NOTIONAL_LONG = 10.0
+NOTIONAL_SHORT = 10.0
 FEE_BPS = 4.5
 GAP_BPS = 50.0
 
@@ -65,22 +62,32 @@ def main() -> None:
     )
 
     strategies = [
-        HODL_10(**_shared),
-        gap_HODL10(gap_bps=GAP_BPS, **_shared),
+        strat.HODL10(**_shared),
+        strat.HODL30(**_shared),
+        strat.HODL10_reset(**_shared),
+        strat.HODL30_reset(**_shared),
+        strat.HODL10_exp(**_shared),
+        strat.HODL30_exp(**_shared),
     ]
 
-    # ——— commented-out alternatives ———
-    # HODL_30(**_shared),
-    # HODL_combined(
-    #     expiry_days=EXPIRY_DAYS, n_long=N_long, n_short=N_short,
-    #     **{k: v for k, v in _shared.items() if k != "n"},
-    # ),
-
-    for strat in strategies:
-        result = run_backtest(strat, market, str(cfg.ranks_path), bt_cfg, verbose=True)
-        out = RESULTS_DIR / f"{strat.name}.json"
+    for strategy in strategies:
+        result = run_backtest(
+            strategy, market, str(cfg.ranks_path), bt_cfg, verbose=True
+        )
+        out = RESULTS_DIR / f"{strategy.name}.json"
         log_results(result, str(out))
         print(f"  → saved {out}")
+        net_pnl = (
+            result.long_pnl + result.short_pnl + result.funding_pnl - result.total_fees
+        )
+        print(
+            f"  PnL breakdown:"
+            f"  long={result.long_pnl:+.4f}"
+            f"  short={result.short_pnl:+.4f}"
+            f"  funding={result.funding_pnl:+.4f}"
+            f"  fees_paid={result.total_fees:.4f}"
+            f"  net={net_pnl:+.4f}"
+        )
 
 
 if __name__ == "__main__":

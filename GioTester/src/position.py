@@ -2,35 +2,51 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+from enum import Enum
+from typing import List, Optional, Tuple
 
 import pandas as pd
+
+
+class CloseReason(Enum):
+    EXPIRY = "expiry"
+    LIQUIDATION = "liquidation"
+    STOPLOSS = "stoploss"
+    FORCE = "force"
+    NET = "net"
+
+
+class ExpiryMode(Enum):
+    RESET_LATEST = "reset_latest"
+    KEEP_EARLIEST = "keep_earliest"
+    PROPORTIONAL = "proportional"
 
 
 @dataclass
 class Position:
     id: int
     perp: str
-    side: int  # +1 long, -1 short
-    qty: float  # absolute coin size, > 0
+    side: int          # +1 long, -1 short
+    qty: float         # absolute coin size, > 0
     entry_price: float
     entry_time: pd.Timestamp
-    expiry_bars: int  # bars until expiry close (HODL)
+    expiry_bars: int   # total bars from open to expiry (reference only)
+    abs_expiry_bar: int  # absolute bar index at expiry; updated on merge per expiry_mode
     leverage: float
-    initial_margin: float  # isolated bucket; absorbs funding
-    notional: float  # qty * entry_price
-    cumulative_funding: float = 0.0  # signed: + received, - paid
-    cumulative_fees: float = 0.0  # always >= 0
-    realized_pnl: float = 0.0  # set on close; excludes fees
+    initial_margin: float   # isolated bucket; absorbs funding and partial-close reductions
+    notional: float         # qty * entry_price; updated on merge/partial-close
+    expiry_mode: ExpiryMode = ExpiryMode.RESET_LATEST
+    tranches: List[Tuple[float, int]] = field(default_factory=list)  # [(qty, abs_expiry_bar)] proportional only
+    mm_rate: float = 0.05              # maintenance margin rate = 1/(2*max_asset_leverage)
+    cumulative_funding: float = 0.0    # signed: + received, - paid
+    cumulative_fees: float = 0.0       # always >= 0; includes open fee + all close fees
+    realized_pnl: float = 0.0          # accumulates via += in both partial and full closes
     mark_price: float = 0.0
-    bar_age: int = 0  # full bars elapsed since entry
+    bar_age: int = 0                   # full bars elapsed since open (or last reset on merge)
     closed: bool = False
-    close_reason: Optional[str] = (
-        None  # "expiry" | "liquidation" | "stoploss" | "force"
-    )
-    close_price: Optional[float] = (
-        None  # forced exit price (e.g. liq); None = use bar open
-    )
+    close_reason: Optional[CloseReason] = None
+    close_price: Optional[float] = None  # override fill price (liq); None = bar open
+    close_qty: Optional[float] = None    # None = full close; set for proportional partial closes
 
     def update_funding(self, rate: float, oracle_px: float) -> None:
         """Apply hourly funding payment to this position.
@@ -61,23 +77,26 @@ class Position:
         return self.qty * (self.mark_price if self.mark_price > 0 else self.entry_price)
 
     def liquidation_price(self) -> float:
-        """Isolated-margin liq price.
+        """Isolated-margin liq price via HL exact formula.
 
-        equity_at_p = initial_margin + side*qty*(p - entry)
-        mm_required(p) = mm_frac * qty * p
-        liq when equity == mm_required:
-            initial_margin + side*qty*(p - entry) = mm_frac*qty*p
-            p*(side*qty - mm_frac*qty) = side*qty*entry - initial_margin
-            p = (side*qty*entry - initial_margin) / (qty*(side - mm_frac))
+        Derived by solving: (initial_margin + unrealized_pnl) = qty * liq_px * mm_rate
+        Closed form (mark-independent):
+            liq_px = (entry_px * qty - initial_margin) / (qty * (1 - mm_rate))  [long]
+            liq_px = (entry_px * qty + initial_margin) / (qty * (1 + mm_rate))  [short]
+        Equivalent to: price - side * margin_available / qty / (1 - mm_rate * side)
+        where margin_available = (initial_margin + unrealized_pnl) - qty * price * mm_rate.
         """
-        if self.qty <= 0 or self.leverage <= 0:
+        if self.qty <= 0 or self.mark_price <= 0:
             return float("nan")
-        mm_frac = 1.0 / (2.0 * self.leverage)
-        denom = self.qty * (self.side - mm_frac)
+        l = self.mm_rate
+        price = self.mark_price
+        equity = self.initial_margin + self.unrealized_pnl
+        maintenance_required = self.qty * price * l
+        margin_available = equity - maintenance_required
+        denom = 1.0 - l * self.side
         if abs(denom) < 1e-12:
             return float("nan")
-        num = self.side * self.qty * self.entry_price - self.initial_margin
-        liq = num / denom
+        liq = price - self.side * margin_available / self.qty / denom
         return liq if liq > 0 else float("nan")
 
 
@@ -91,10 +110,3 @@ class NewOrder:
     leverage: float
     expiry_bars: int
     limit_price: Optional[float] = None  # None = market; set = limit (checked vs bar high/low)
-
-
-# Legacy stub kept for back-compat; real strategies live in strategies.py.
-class HODL(Position):
-    """Deprecated stub. See strategies.HODL_10 / strategies.HODL_30."""
-
-    pass

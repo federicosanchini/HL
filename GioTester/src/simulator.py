@@ -15,8 +15,8 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 from .config import BacktestConfig  # noqa: E402
-from .data_loader import DataLoader, MarketData  # noqa: E402
-from .position import NewOrder, Position  # noqa: E402
+from .data_loader import DataLoader, MarketData, mm_rate_for  # noqa: E402
+from .position import CloseReason, ExpiryMode, NewOrder, Position  # noqa: E402
 from .state import MarketState, StateBucket  # noqa: E402
 from .strategies import Strategy  # noqa: E402
 
@@ -44,6 +44,10 @@ class SimResult:
     n_opened: int
     n_closed: int
     n_liquidated: int
+    long_pnl: float = 0.0    # realized PnL from long positions
+    short_pnl: float = 0.0   # realized PnL from short positions
+    funding_pnl: float = 0.0 # net funding received (negative = paid)
+    total_fees: float = 0.0  # total fees paid (always >= 0)
 
 
 # ————————————————————————————————————————————————————————————————————————— #
@@ -162,6 +166,8 @@ def _build_market_state(sd: SimData, i: int, n_bars: int) -> MarketState:
             is_release = True
             ranks_row = sd.ranks_by_release[day]
 
+    mm_rate_cache = {perp: mm_rate_for(perp) for perp in sd.perps}
+
     return MarketState(
         timestamp=ts,
         bar_index=i,
@@ -170,6 +176,7 @@ def _build_market_state(sd: SimData, i: int, n_bars: int) -> MarketState:
         funding_row=funding_row,
         oracle=oracle_row,
         current_ranks_row=ranks_row,
+        mm_rate_cache=mm_rate_cache,
         is_release_bar=is_release,
     )
 
@@ -178,29 +185,32 @@ def _execute_close(
     pos: Position,
     fill_px: float,
     fee_bps: float,
-    liq_fee_frac: float,
     bucket: StateBucket,
 ) -> None:
     """Close pos at fill_px; settle margin + fees; update locked stats."""
     notional_close = abs(pos.qty) * fill_px
     fee = notional_close * fee_bps / 1e4
     pnl = pos.side * pos.qty * (fill_px - pos.entry_price)
-    pos.realized_pnl = pnl
+    pos.realized_pnl += pnl  # accumulate: may include prior partial-close PnL
     pos.cumulative_fees += fee
     margin_after = pos.initial_margin + pnl - fee
-    if pos.close_reason == "liquidation":
-        liq_fee = max(0.0, margin_after) * liq_fee_frac
-        pos.cumulative_fees += liq_fee
-        margin_after -= liq_fee
-    margin_after = max(margin_after, 0.0)  # cannot go negative for isolated
+    if pos.close_reason == CloseReason.LIQUIDATION:
+        # HL: maintenance margin forfeited to HLP vault; trader receives nothing back.
+        margin_after = 0.0
+    else:
+        margin_after = max(margin_after, 0.0)
     bucket.cash += margin_after
     pos.closed = True
     pos.mark_price = fill_px
     s = bucket.perp_stats(pos.perp)
     s["locked_realized"] += pos.realized_pnl
+    if pos.side == 1:
+        s["locked_realized_long"] += pos.realized_pnl
+    else:
+        s["locked_realized_short"] += pos.realized_pnl
     s["locked_funding"] += pos.cumulative_funding
     s["locked_fees"] += pos.cumulative_fees
-    if pos.close_reason == "force":
+    if pos.close_reason == CloseReason.FORCE:
         s["n_closed"] += 1
 
 
@@ -212,6 +222,9 @@ def _execute_open(
     next_id: int,
     bucket: StateBucket,
     ohlc_row: Optional[np.ndarray] = None,
+    mm_rate: float = 0.05,
+    abs_expiry_bar: int = 0,
+    expiry_mode: ExpiryMode = ExpiryMode.RESET_LATEST,
 ) -> Optional[Position]:
     if not (math.isfinite(fill_px) and fill_px > 0):
         return None
@@ -240,14 +253,114 @@ def _execute_open(
         entry_price=fill_px,
         entry_time=ts,
         expiry_bars=order.expiry_bars,
+        abs_expiry_bar=abs_expiry_bar,
         leverage=order.leverage,
         initial_margin=margin,
         notional=notional,
+        expiry_mode=expiry_mode,
+        tranches=[(qty, abs_expiry_bar)] if expiry_mode == ExpiryMode.PROPORTIONAL else [],
+        mm_rate=mm_rate,
         cumulative_fees=fee,
         mark_price=fill_px,
     )
     bucket.current_positions[next_id] = pos
+    bucket.register_position(pos)
     return pos
+
+
+def _execute_partial_close(
+    pos: Position,
+    close_qty: float,
+    fill_px: float,
+    fee_bps: float,
+    bucket: StateBucket,
+) -> None:
+    """Reduce pos by close_qty at fill_px. Position stays in bucket.current_positions."""
+    close_frac = close_qty / pos.qty
+    margin_released = pos.initial_margin * close_frac
+    fee = close_qty * fill_px * fee_bps / 1e4
+    pnl = pos.side * close_qty * (fill_px - pos.entry_price)
+    pos.realized_pnl += pnl
+    pos.cumulative_fees += fee
+    pos.qty -= close_qty
+    pos.initial_margin -= margin_released
+    pos.notional = pos.qty * pos.entry_price
+    pos.close_qty = None
+    margin_return = max(margin_released + pnl - fee, 0.0)
+    bucket.cash += margin_return
+
+
+def _merge_into(
+    existing: Position,
+    order: NewOrder,
+    fill_px: float,
+    fee_bps: float,
+    ts: pd.Timestamp,
+    bucket: StateBucket,
+    abs_expiry_bar: int,
+) -> None:
+    """VWAP-merge a same-side order into an existing position (HL netting behaviour)."""
+    add_qty = order.notional / fill_px
+    add_margin = order.notional / order.leverage
+    fee = order.notional * fee_bps / 1e4
+    if bucket.cash < add_margin + fee:
+        return
+    bucket.cash -= add_margin + fee
+    existing.cumulative_fees += fee
+    total_qty = existing.qty + add_qty
+    existing.entry_price = (
+        existing.qty * existing.entry_price + add_qty * fill_px
+    ) / total_qty
+    existing.qty = total_qty
+    existing.notional = total_qty * existing.entry_price
+    existing.initial_margin += add_margin
+    if existing.expiry_mode == ExpiryMode.RESET_LATEST:
+        existing.abs_expiry_bar = abs_expiry_bar
+        existing.bar_age = 0
+    elif existing.expiry_mode == ExpiryMode.PROPORTIONAL:
+        existing.tranches.append((add_qty, abs_expiry_bar))
+    # "keep_earliest": abs_expiry_bar unchanged
+
+
+def _net_against(
+    opposing: Position,
+    order: NewOrder,
+    fill_px: float,
+    fee_bps: float,
+    ts: pd.Timestamp,
+    next_id: int,
+    bucket: StateBucket,
+    abs_expiry_bar: int,
+    strategy: Strategy,
+    mm_rate: float,
+) -> Optional[Position]:
+    """Net new order against opposing-side position. Returns new Position if remainder."""
+    order_qty = order.notional / fill_px
+    if order_qty >= opposing.qty - 1e-10:
+        # Close opposing fully; open remainder if above min notional
+        opposing.close_reason = CloseReason.NET
+        _execute_close(opposing, fill_px, fee_bps, bucket)
+        bucket.unregister_position(opposing.perp, opposing.side)
+        bucket.current_positions.pop(opposing.id, None)
+        remainder_qty = order_qty - opposing.qty
+        remainder_notional = remainder_qty * fill_px
+        if remainder_notional >= strategy.min_notional_usd:
+            rem_order = NewOrder(
+                perp=order.perp,
+                side=order.side,
+                notional=remainder_notional,
+                leverage=order.leverage,
+                expiry_bars=order.expiry_bars,
+            )
+            return _execute_open(
+                rem_order, fill_px, fee_bps, ts, next_id, bucket,
+                mm_rate=mm_rate, abs_expiry_bar=abs_expiry_bar,
+                expiry_mode=strategy.expiry_mode,
+            )
+    else:
+        # Partially reduce opposing
+        _execute_partial_close(opposing, order_qty, fill_px, fee_bps, bucket)
+    return None
 
 
 # ————————————————————————————————————————————————————————————————————————— #
@@ -360,7 +473,6 @@ def run_backtest(
 
     next_id = 1
     fee_bps = bt_cfg.taker_fee_bps
-    liq_fee_frac = bt_cfg.liquidation_fee_frac
 
     iterator = tqdm(range(n_bars), desc=strategy.name) if verbose else range(n_bars)
     last_idx = n_bars - 1
@@ -372,7 +484,7 @@ def run_backtest(
         # End-of-data: force close everyone at this last bar's open
         if i == last_idx:
             for pos in list(bucket.current_positions.values()):
-                pos.close_reason = "force"
+                pos.close_reason = CloseReason.FORCE
                 pos.close_price = None
             # synthetic flush — drain via execute_close at bar open
             for pos in list(bucket.current_positions.values()):
@@ -381,14 +493,15 @@ def run_backtest(
                     px = float(row[0])
                 else:
                     px = pos.mark_price if pos.mark_price > 0 else pos.entry_price
-                _execute_close(pos, px, fee_bps, liq_fee_frac, bucket)
+                _execute_close(pos, px, fee_bps, bucket)
+                bucket.unregister_position(pos.perp, pos.side)
                 bucket.current_positions.pop(pos.id, None)
         else:
             closed_list, new_orders = strategy.update_positions(bucket)
 
             # Closes at this bar's open (forced fills override)
             for pos in closed_list:
-                if pos.close_reason == "liquidation" and pos.close_price is not None:
+                if pos.close_reason == CloseReason.LIQUIDATION and pos.close_price is not None:
                     fill = pos.close_price
                 else:
                     o = ms.ohlc_row.get(pos.perp)
@@ -397,22 +510,42 @@ def run_backtest(
                         if o is not None and math.isfinite(o[0])
                         else pos.entry_price
                     )
-                _execute_close(pos, fill, fee_bps, liq_fee_frac, bucket)
-                del bucket.current_positions[pos.id]
+                if pos.close_qty is not None:
+                    # Proportional partial close — position stays in bucket
+                    _execute_partial_close(pos, pos.close_qty, fill, fee_bps, bucket)
+                else:
+                    _execute_close(pos, fill, fee_bps, bucket)
+                    bucket.unregister_position(pos.perp, pos.side)
+                    del bucket.current_positions[pos.id]
 
-            # Opens
+            # Opens — with HL-style netting: same-side merges, opposing-side nets
             for order in new_orders:
                 row = ms.ohlc_row.get(order.perp)
                 if row is None or not math.isfinite(row[0]):
                     continue
                 if order.notional < strategy.min_notional_usd:
                     continue
-                placed = _execute_open(
-                    order, float(row[0]), fee_bps, ms.timestamp, next_id, bucket,
-                    ohlc_row=row,
-                )
-                if placed is not None:
-                    next_id += 1
+                fill_px = float(row[0])
+                abs_exp = i + order.expiry_bars
+                existing = bucket.get_position(order.perp, order.side)
+                opposing = bucket.get_position(order.perp, -order.side)
+                if existing is not None:
+                    _merge_into(existing, order, fill_px, fee_bps, ms.timestamp, bucket, abs_exp)
+                elif opposing is not None:
+                    new_pos = _net_against(
+                        opposing, order, fill_px, fee_bps, ms.timestamp,
+                        next_id, bucket, abs_exp, strategy, ms.mm_rate_cache.get(order.perp, 0.05),
+                    )
+                    if new_pos is not None:
+                        next_id += 1
+                else:
+                    placed = _execute_open(
+                        order, fill_px, fee_bps, ms.timestamp, next_id, bucket,
+                        ohlc_row=row, mm_rate=ms.mm_rate_cache.get(order.perp, 0.05),
+                        abs_expiry_bar=abs_exp, expiry_mode=strategy.expiry_mode,
+                    )
+                    if placed is not None:
+                        next_id += 1
 
             # Mark + funding for open positions
             for pos in bucket.current_positions.values():
@@ -424,8 +557,8 @@ def run_backtest(
                 )
                 pos.mark(close_px)
                 rate = ms.funding_row.get(pos.perp, float("nan"))
-                ora = ms.oracle.get(pos.perp, close_px)
-                if math.isfinite(rate) and math.isfinite(ora):
+                ora = ms.oracle.get(pos.perp)  # None if missing; no mark fallback
+                if math.isfinite(rate) and ora is not None and math.isfinite(ora):
                     pos.update_funding(rate, ora)
 
         # Snapshot per-perp contribution at this bar
@@ -436,7 +569,7 @@ def run_backtest(
             contrib_per_perp[p] = base
         for pos in bucket.current_positions.values():
             contrib_per_perp[pos.perp] = contrib_per_perp.get(pos.perp, 0.0) + (
-                pos.unrealized_pnl + pos.cumulative_funding - pos.cumulative_fees
+                pos.realized_pnl + pos.unrealized_pnl + pos.cumulative_funding - pos.cumulative_fees
             )
 
         for p in sd.perps:
@@ -461,6 +594,11 @@ def run_backtest(
     n_closed = sum(s["n_closed"] for s in bucket.stats_data_bucket.values())
     n_liq = sum(s["n_liquidated"] for s in bucket.stats_data_bucket.values())
 
+    long_pnl = sum(s["locked_realized_long"] for s in bucket.stats_data_bucket.values())
+    short_pnl = sum(s["locked_realized_short"] for s in bucket.stats_data_bucket.values())
+    funding_pnl = sum(s["locked_funding"] for s in bucket.stats_data_bucket.values())
+    total_fees = sum(s["locked_fees"] for s in bucket.stats_data_bucket.values())
+
     if verbose:
         _print_table(strategy.name, metrics_per_perp, metrics_total)
         print(f"  trades opened={n_opened}  closed={n_closed}  liquidated={n_liq}")
@@ -475,6 +613,10 @@ def run_backtest(
         n_opened=int(n_opened),
         n_closed=int(n_closed),
         n_liquidated=int(n_liq),
+        long_pnl=float(long_pnl),
+        short_pnl=float(short_pnl),
+        funding_pnl=float(funding_pnl),
+        total_fees=float(total_fees),
     )
 
 

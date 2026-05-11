@@ -9,7 +9,7 @@ _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-from .position import NewOrder, Position  # noqa: E402
+from .position import CloseReason, ExpiryMode, NewOrder, Position  # noqa: E402
 from .state import StateBucket  # noqa: E402
 
 
@@ -29,6 +29,7 @@ class Strategy:
         min_notional_usd: float = 10.0,
         blackout_days_end: int = 50,
         bars_per_day: int = 24,
+        expiry_mode: ExpiryMode = ExpiryMode.RESET_LATEST,
     ) -> None:
         self.expiry_days = int(expiry_days)
         self.expiry_bars = int(expiry_days) * int(bars_per_day)
@@ -39,9 +40,8 @@ class Strategy:
         self.taker_fee_bps = float(taker_fee_bps)
         self.min_notional_usd = float(min_notional_usd)
         self.blackout_bars_end = int(blackout_days_end) * int(bars_per_day)
-        self._min_notional_warned: set = (
-            set()
-        )  # pos ids warned once; avoids per-bar spam
+        self.expiry_mode = expiry_mode
+        self._min_notional_warned: set = set()
 
     # ——— main hook called by simulator each bar ———
     def update_positions(
@@ -57,6 +57,7 @@ class Strategy:
         self, bucket: StateBucket, verbose: bool = False
     ) -> List[Position]:
         ms = bucket.market_state
+        bar_idx = ms.bar_index
         out: List[Position] = []
         for pos in list(bucket.current_positions.values()):
             # 1) liquidation (always active) — checked vs latest mark
@@ -66,38 +67,64 @@ class Strategy:
                     pos.side == -1 and pos.mark_price >= liq_px
                 )
                 if crossed:
-                    pos.close_reason = "liquidation"
+                    pos.close_reason = CloseReason.LIQUIDATION
                     pos.close_price = liq_px
+                    pos.close_qty = None  # always full
                     out.append(pos)
                     continue
             # 2) stoploss placeholder
             if self._stoploss_hit(pos, bucket):
-                pos.close_reason = "stoploss"
+                pos.close_reason = CloseReason.STOPLOSS
                 pos.close_price = None
+                pos.close_qty = None
                 out.append(pos)
                 continue
-            # 3) expiry
-            if pos.bar_age >= pos.expiry_bars:
-                # min-notional gate on close (force keep if residual < threshold)
-                residual = abs(pos.qty) * (
-                    pos.mark_price if pos.mark_price > 0 else pos.entry_price
-                )
-                if residual < self.min_notional_usd:
-                    if pos.id not in self._min_notional_warned:
-                        if verbose:
-                            print(
-                                f"[keep] pos#{pos.id} {pos.perp}: residual ${residual:.2f} < "
-                                f"${self.min_notional_usd:.2f} min_notional, holding"
-                            )
-                        self._min_notional_warned.add(pos.id)
+            # 3) expiry — behaviour depends on expiry_mode set on position
+            if pos.expiry_mode == ExpiryMode.PROPORTIONAL:
+                expired = [(q, e) for q, e in pos.tranches if bar_idx >= e]
+                if not expired:
                     continue
-                pos.close_reason = "expiry"
-                pos.close_price = None
+                remaining = [(q, e) for q, e in pos.tranches if bar_idx < e]
+                close_qty = sum(q for q, _ in expired)
+                mark = pos.mark_price if pos.mark_price > 0 else pos.entry_price
+                remaining_notional = (pos.qty - close_qty) * mark
+                if (
+                    remaining_notional < self.min_notional_usd
+                    or close_qty >= pos.qty - 1e-10
+                ):
+                    # force full close — residual too small or last tranche
+                    pos.tranches = []
+                    pos.close_reason = CloseReason.EXPIRY
+                    pos.close_price = None
+                    pos.close_qty = None
+                else:
+                    pos.tranches = remaining
+                    pos.close_reason = CloseReason.EXPIRY
+                    pos.close_price = None
+                    pos.close_qty = close_qty
                 out.append(pos)
+            else:
+                if bar_idx >= pos.abs_expiry_bar:
+                    residual = abs(pos.qty) * (
+                        pos.mark_price if pos.mark_price > 0 else pos.entry_price
+                    )
+                    if residual < self.min_notional_usd:
+                        if pos.id not in self._min_notional_warned:
+                            if verbose:
+                                print(
+                                    f"[keep] pos#{pos.id} {pos.perp}: residual ${residual:.2f} < "
+                                    f"${self.min_notional_usd:.2f} min_notional, holding"
+                                )
+                            self._min_notional_warned.add(pos.id)
+                        continue
+                    pos.close_reason = CloseReason.EXPIRY
+                    pos.close_price = None
+                    pos.close_qty = None
+                    out.append(pos)
         return out
 
     def _stoploss_hit(self, pos: Position, bucket: StateBucket) -> bool:
-        return False  # placeholder — no SL/TP for HODL
+        return False
 
     # ——— open ———
     def open_positions(self, bucket: StateBucket) -> List[NewOrder]:
@@ -108,8 +135,9 @@ class Strategy:
     ) -> None:
         for pos in closed:
             s = bucket.perp_stats(pos.perp)
-            s["n_closed"] += 1
-            if pos.close_reason == "liquidation":
+            if pos.close_qty is None:  # full close only
+                s["n_closed"] += 1
+            if pos.close_reason == CloseReason.LIQUIDATION:
                 s["n_liquidated"] += 1
         for o in opened:
             s = bucket.perp_stats(o.perp)
@@ -139,7 +167,6 @@ class HODL(Strategy):
             return []
 
         sig_idx = 0 if self.expiry_days == 10 else 1  # 0 -> pred_10d, 1 -> pred_30d
-        # Filter: only perps that have OHLC at this bar
         cands: List[Tuple[str, float]] = []
         for perp, preds in ms.current_ranks_row.items():
             if perp not in ms.ohlc_row:
@@ -151,10 +178,9 @@ class HODL(Strategy):
         if len(cands) < 2:
             return []
 
-        cands.sort(key=lambda t: (t[1], t[0]))  # ascending by signal, deterministic
+        cands.sort(key=lambda t: (t[1], t[0]))
         shorts = cands[: self.n]
         longs = cands[-self.n :]
-        # avoid overlap when universe small
         long_set = {p for p, _ in longs}
         shorts = [(p, s) for p, s in shorts if p not in long_set]
 
@@ -186,24 +212,50 @@ class HODL(Strategy):
         return orders
 
 
-class HODL_10(HODL):
-    name = "HODL_10"
+class HODL10(HODL):
+    name = "HODL10"
 
     def __init__(self, **kw) -> None:
         kw.setdefault("expiry_days", 10)
         super().__init__(**kw)
 
 
-class HODL_30(HODL):
-    name = "HODL_30"
+class HODL30(HODL):
+    name = "HODL30"
 
     def __init__(self, **kw) -> None:
         kw.setdefault("expiry_days", 30)
         super().__init__(**kw)
 
 
-class gap_HODL10(HODL_10):
-    """HODL_10 with limit entries: longs GAP bps below bar open, shorts GAP bps above."""
+# ——— expiry_mode variants (factory-generated) ———
+
+
+def _make_hodl_variant(days: int, mode: ExpiryMode, name_suffix: str) -> type:
+    """Factory: create HODL variant with fixed expiry_days and expiry_mode."""
+
+    class _HODLVariant(HODL):
+        name = f"HODL{days}_{name_suffix}"
+
+        def __init__(self, **kw) -> None:
+            kw.setdefault("expiry_days", days)
+            kw.setdefault("expiry_mode", mode)
+            super().__init__(**kw)
+
+    return _HODLVariant
+
+
+HODL10_reset = _make_hodl_variant(10, ExpiryMode.KEEP_EARLIEST, "reset")
+HODL30_reset = _make_hodl_variant(30, ExpiryMode.KEEP_EARLIEST, "reset")
+HODL10_exp = _make_hodl_variant(10, ExpiryMode.PROPORTIONAL, "exp")
+HODL30_exp = _make_hodl_variant(30, ExpiryMode.PROPORTIONAL, "exp")
+
+
+# ——— existing compound strategies ———
+
+
+class gap_HODL10(HODL10):
+    """HODL10 with limit entries: longs GAP bps below bar open, shorts GAP bps above."""
 
     name = "gap_HODL10"
 
@@ -227,9 +279,7 @@ class gap_HODL10(HODL_10):
 
 
 class HODL_combined(HODL):
-    """Long perps that rank top-N in BOTH pred_10d and pred_30d; short bottom-N in both.
-    n_long / n_short control the intersection pool size per signal independently.
-    """
+    """Long perps that rank top-N in BOTH pred_10d and pred_30d; short bottom-N in both."""
 
     name = "HODL_combined"
 
