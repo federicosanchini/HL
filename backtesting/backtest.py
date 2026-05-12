@@ -172,8 +172,8 @@ class BacktestConfig:
     default_max_leverage: float = 5.0
     fee_rate: float = 0.00045
     liquidation_fee_rate: float = 0.0
-    entry_hour_utc: int = 0
-    max_entry_delay_hours: int = 23
+    entry_hour_utc: int = 19
+    max_entry_delay_hours: int = 1
     execution_price_col: str = "open"
     close_at_end: bool = True
     min_prediction_rows_per_day: int = 2
@@ -836,11 +836,24 @@ class HyperliquidBacktester:
         realized = 0.0
         action = "open"
 
-        # New position or same-side merge: requires fresh isolated collateral.
+        # New position or same-side merge: requires fresh collateral.
         if old_pos is None or old_pos.side == side:
             margin = self._required_initial_margin(notional)
-            required_cash = fee + (margin if self.cfg.margin_mode == "isolated" else 0.0)
-            if not self._has_cash_for(required_cash):
+            if self.cfg.margin_mode == "isolated":
+                # Isolated: cash must cover both the initial margin and the fee.
+                sufficient = self._has_cash_for(fee + margin)
+                skip_action = "skipped_insufficient_free_collateral"
+            else:
+                # Cross: cash must cover the fee; account equity must have enough
+                # headroom above all existing initial-margin requirements plus the
+                # new requirement (mirroring HL's available-margin check).
+                total_margin_in_use = sum(p.initial_margin for p in self.positions.values())
+                sufficient = (
+                    self._has_cash_for(fee)
+                    and self.account_equity() >= total_margin_in_use + margin + fee
+                )
+                skip_action = "skipped_insufficient_account_equity"
+            if not sufficient:
                 self.trade_records.append({
                     "time": time,
                     "symbol": symbol,
@@ -851,7 +864,7 @@ class HyperliquidBacktester:
                     "fee": 0.0,
                     "realized_pnl": 0.0,
                     "reason": reason,
-                    "action": "skipped_insufficient_free_collateral",
+                    "action": skip_action,
                     "prediction": prediction,
                     "signal_date": signal_date,
                     "max_leverage": max_lev,
@@ -1254,9 +1267,14 @@ class HyperliquidBacktester:
         # current isolated margins after funding plus unrealized PnL. In cross mode,
         # it keeps the earlier approximation.
         if self.cfg.margin_mode == "isolated":
+            # Isolated: sum of live position margins (which absorb funding) + unrealized PnL.
             margin_portfolio_value = posted_margin + unreal_total
         else:
-            margin_portfolio_value = posted_margin + unreal_total + self.total_funding_pnl - self.total_fees
+            # Cross: funding and fees are already reflected in self.cash, so
+            # account_equity() = cash + unrealized is the correct portfolio value.
+            # posted_margin is a *requirement* (never deducted from cash), and
+            # adding total_funding_pnl / total_fees would double-count them.
+            margin_portfolio_value = self.account_equity()
 
         self.hourly_records.append({
             "time": time,
@@ -1890,8 +1908,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fee-rate", type=float, default=0.00045)
     parser.add_argument("--liquidation-fee-rate", type=float, default=0.0)
 
-    parser.add_argument("--entry-hour-utc", type=int, default=0)
-    parser.add_argument("--max-entry-delay-hours", type=int, default=23)
+    parser.add_argument("--entry-hour-utc", type=int, default=19)
+    parser.add_argument("--max-entry-delay-hours", type=int, default=1)
     parser.add_argument("--execution-price-col", type=str, default="open", choices=["open", "high", "low", "close"])
     parser.add_argument("--no-close-at-end", action="store_true")
     return parser.parse_args()
