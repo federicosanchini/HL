@@ -26,27 +26,35 @@ class ExpiryMode(Enum):
 class Position:
     id: int
     perp: str
-    side: int          # +1 long, -1 short
-    qty: float         # absolute coin size, > 0
+    side: int  # +1 long, -1 short
+    qty: float  # absolute coin size, > 0
     entry_price: float
     entry_time: pd.Timestamp
-    expiry_bars: int   # total bars from open to expiry (reference only)
-    abs_expiry_bar: int  # absolute bar index at expiry; updated on merge per expiry_mode
+    expiry_bars: int  # total bars from open to expiry (reference only)
+    abs_expiry_bar: (
+        int  # absolute bar index at expiry; updated on merge per expiry_mode
+    )
     leverage: float
-    initial_margin: float   # isolated bucket; absorbs funding and partial-close reductions
-    notional: float         # qty * entry_price; updated on merge/partial-close
+    initial_margin: (
+        float  # isolated bucket; absorbs funding and partial-close reductions
+    )
+    notional: float  # qty * entry_price; updated on merge/partial-close
     expiry_mode: ExpiryMode = ExpiryMode.RESET_LATEST
-    tranches: List[Tuple[float, int]] = field(default_factory=list)  # [(qty, abs_expiry_bar)] proportional only
-    mm_rate: float = 0.05              # maintenance margin rate = 1/(2*max_asset_leverage)
-    cumulative_funding: float = 0.0    # signed: + received, - paid
-    cumulative_fees: float = 0.0       # always >= 0; includes open fee + all close fees
-    realized_pnl: float = 0.0          # accumulates via += in both partial and full closes
+    tranches: List[Tuple[float, int]] = field(
+        default_factory=list
+    )  # [(qty, abs_expiry_bar)] proportional only
+    mm_rate: float = 0.05  # maintenance margin rate = 1/(2*max_asset_leverage)
+    cumulative_funding: float = 0.0  # signed: + received, - paid
+    cumulative_fees: float = 0.0  # always >= 0; includes open fee + all close fees
+    realized_pnl: float = 0.0  # accumulates via += in both partial and full closes
     mark_price: float = 0.0
-    bar_age: int = 0                   # full bars elapsed since open (or last reset on merge)
+    bar_age: int = 0  # full bars elapsed since open (or last reset on merge)
     closed: bool = False
     close_reason: Optional[CloseReason] = None
     close_price: Optional[float] = None  # override fill price (liq); None = bar open
-    close_qty: Optional[float] = None    # None = full close; set for proportional partial closes
+    close_qty: Optional[float] = (
+        None  # None = full close; set for proportional partial closes
+    )
 
     def update_funding(self, rate: float, oracle_px: float) -> None:
         """Apply hourly funding payment to this position.
@@ -101,6 +109,17 @@ class Position:
 
 
 @dataclass
+class LiquidationEvent:
+    """Record of a single liquidation: cash forfeited to HLP vault."""
+
+    timestamp: str  # ISO-8601 UTC bar timestamp
+    asset: str  # perp symbol
+    net_cash_loss: (
+        float  # initial_margin + pnl_close - fee_close; positive = margin forfeited
+    )
+
+
+@dataclass
 class NewOrder:
     """Strategy → simulator: open this position at next available fill."""
 
@@ -109,4 +128,6 @@ class NewOrder:
     notional: float
     leverage: float
     expiry_bars: int
-    limit_price: Optional[float] = None  # None = market; set = limit (checked vs bar high/low)
+    limit_price: Optional[float] = (
+        None  # None = market; set = limit (checked vs bar high/low)
+    )

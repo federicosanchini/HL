@@ -60,9 +60,11 @@ class StateBucket:
         d = self.stats_data_bucket.get(perp)
         if d is None:
             d = {
-                "locked_realized": 0.0,       # sum realized_pnl of closed positions on this perp
-                "locked_realized_long": 0.0,  # subset: long positions only
-                "locked_realized_short": 0.0, # subset: short positions only
+                "locked_realized": 0.0,       # sum realized_pnl of ALL closed positions (including liq)
+                "locked_realized_long": 0.0,  # subset: non-liquidated long positions only
+                "locked_realized_short": 0.0, # subset: non-liquidated short positions only
+                "locked_liq_long": 0.0,       # realized_pnl of liquidated long positions
+                "locked_liq_short": 0.0,      # realized_pnl of liquidated short positions
                 "locked_funding": 0.0,        # sum cumulative_funding of closed positions
                 "locked_fees": 0.0,           # sum cumulative_fees of closed positions
                 "n_opened": 0,

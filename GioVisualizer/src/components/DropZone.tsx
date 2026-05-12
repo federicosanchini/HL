@@ -1,5 +1,5 @@
-import { Stack, Text } from '@mantine/core';
-import { Dropzone, MIME_TYPES } from '@mantine/dropzone';
+import { Stack, Text } from "@mantine/core";
+import { Dropzone } from "@mantine/dropzone";
 
 interface Props {
   onFile: (file: File) => void;
@@ -9,12 +9,17 @@ export default function DropZone({ onFile }: Props) {
   return (
     <Dropzone
       onDrop={(files) => files[0] && onFile(files[0])}
-      accept={{ [MIME_TYPES.json]: ['.json'] }}
+      accept={{ "application/json": [".json"] }}
       maxFiles={1}
+      styles={{ root: { background: "transparent", border: "none" } }}
     >
-      <Stack align="center" gap="xs" py="xl" style={{ pointerEvents: 'none' }}>
-        <Text size="xl">Drop backtest JSON here</Text>
-        <Text size="sm" c="dimmed">or click to select file</Text>
+      <Stack align="center" gap="xs" py="xl" style={{ pointerEvents: "none" }}>
+        <Text size="xl" style={{ color: "var(--text-primary)" }}>
+          Drop backtest JSON here
+        </Text>
+        <Text size="sm" style={{ color: "var(--text-secondary)" }}>
+          or click to select file
+        </Text>
       </Stack>
     </Dropzone>
   );

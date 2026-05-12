@@ -12,7 +12,7 @@ from pathlib import Path
 
 from src.config import BacktestConfig, DataConfig  # noqa: E402
 from src.data_loader import DataLoader  # noqa: E402
-from src.simulator import run_backtest, log_results  # noqa: E402
+from src.simulator import run_backtest, log_results, print_result_summary  # noqa: E402
 import src.strategies as strat
 
 # ——— constants ———
@@ -76,18 +76,7 @@ def main() -> None:
         )
         out = RESULTS_DIR / f"{strategy.name}.json"
         log_results(result, str(out))
-        print(f"  → saved {out}")
-        net_pnl = (
-            result.long_pnl + result.short_pnl + result.funding_pnl - result.total_fees
-        )
-        print(
-            f"  PnL breakdown:"
-            f"  long={result.long_pnl:+.4f}"
-            f"  short={result.short_pnl:+.4f}"
-            f"  funding={result.funding_pnl:+.4f}"
-            f"  fees_paid={result.total_fees:.4f}"
-            f"  net={net_pnl:+.4f}"
-        )
+        print_result_summary(result, str(out))
 
 
 if __name__ == "__main__":

@@ -16,7 +16,13 @@ if _SRC_DIR not in sys.path:
 
 from .config import BacktestConfig  # noqa: E402
 from .data_loader import DataLoader, MarketData, mm_rate_for  # noqa: E402
-from .position import CloseReason, ExpiryMode, NewOrder, Position  # noqa: E402
+from .position import (
+    CloseReason,
+    ExpiryMode,
+    LiquidationEvent,
+    NewOrder,
+    Position,
+)  # noqa: E402
 from .state import MarketState, StateBucket  # noqa: E402
 from .strategies import Strategy  # noqa: E402
 
@@ -39,14 +45,18 @@ class SimResult:
     timeline: pd.DatetimeIndex
     total_equity: np.ndarray  # equity curve (initial_cash + cum contribution)
     per_perp_equity: Dict[str, np.ndarray]  # per-perp cum contribution series
+    per_perp_position: Dict[str, np.ndarray]  # per-perp signed token qty series
+    liquidation_events: List[LiquidationEvent]
     metrics_total: Dict[str, float]
     metrics_per_perp: Dict[str, Dict[str, float]]
     n_opened: int
     n_closed: int
     n_liquidated: int
-    long_pnl: float = 0.0    # realized PnL from long positions
-    short_pnl: float = 0.0   # realized PnL from short positions
-    funding_pnl: float = 0.0 # net funding received (negative = paid)
+    long_pnl: float = 0.0  # realized PnL from non-liquidated long closes
+    short_pnl: float = 0.0  # realized PnL from non-liquidated short closes
+    liq_long_pnl: float = 0.0  # realized PnL of liquidated long positions
+    liq_short_pnl: float = 0.0  # realized PnL of liquidated short positions
+    funding_pnl: float = 0.0  # net funding received (negative = paid)
     total_fees: float = 0.0  # total fees paid (always >= 0)
 
 
@@ -72,16 +82,24 @@ def _prepare_sim_data(
 
     # OHLC dense
     ohlc_d: Dict[str, np.ndarray] = {p: np.full((n_bars, 4), np.nan) for p in perps}
-    for perp, g in tqdm(market.ohlc.groupby("perp", sort=False),
-                        desc="OHLC arrays", total=n_perps, leave=False):
+    for perp, g in tqdm(
+        market.ohlc.groupby("perp", sort=False),
+        desc="OHLC arrays",
+        total=n_perps,
+        leave=False,
+    ):
         idx = _idx_map(g["time"])
         valid = idx >= 0
         sub = g[["open", "high", "low", "close"]].to_numpy()
         ohlc_d[perp][idx[valid]] = sub[valid]
 
     fund_d: Dict[str, np.ndarray] = {p: np.full(n_bars, np.nan) for p in perps}
-    for perp, g in tqdm(market.funding.groupby("perp", sort=False),
-                        desc="funding arrays", total=n_perps, leave=False):
+    for perp, g in tqdm(
+        market.funding.groupby("perp", sort=False),
+        desc="funding arrays",
+        total=n_perps,
+        leave=False,
+    ):
         if perp not in fund_d:
             continue
         idx = _idx_map(g["time"])
@@ -89,8 +107,12 @@ def _prepare_sim_data(
         fund_d[perp][idx[valid]] = g["fundingRate"].to_numpy()[valid]
 
     orac_d: Dict[str, np.ndarray] = {p: np.full(n_bars, np.nan) for p in perps}
-    for perp, g in tqdm(market.oracle.groupby("perp", sort=False),
-                        desc="oracle arrays", total=n_perps, leave=False):
+    for perp, g in tqdm(
+        market.oracle.groupby("perp", sort=False),
+        desc="oracle arrays",
+        total=n_perps,
+        leave=False,
+    ):
         if perp not in orac_d:
             continue
         idx = _idx_map(g["time"])
@@ -186,16 +208,21 @@ def _execute_close(
     fill_px: float,
     fee_bps: float,
     bucket: StateBucket,
-) -> None:
-    """Close pos at fill_px; settle margin + fees; update locked stats."""
+) -> float:
+    """Close pos at fill_px; settle margin + fees; update locked stats.
+
+    Returns net_cash_loss (margin forfeited) for LIQUIDATION closes, 0.0 otherwise.
+    """
     notional_close = abs(pos.qty) * fill_px
     fee = notional_close * fee_bps / 1e4
     pnl = pos.side * pos.qty * (fill_px - pos.entry_price)
     pos.realized_pnl += pnl  # accumulate: may include prior partial-close PnL
     pos.cumulative_fees += fee
     margin_after = pos.initial_margin + pnl - fee
+    net_cash_loss = 0.0
     if pos.close_reason == CloseReason.LIQUIDATION:
         # HL: maintenance margin forfeited to HLP vault; trader receives nothing back.
+        net_cash_loss = margin_after  # positive = margin that would have been returned
         margin_after = 0.0
     else:
         margin_after = max(margin_after, 0.0)
@@ -204,14 +231,21 @@ def _execute_close(
     pos.mark_price = fill_px
     s = bucket.perp_stats(pos.perp)
     s["locked_realized"] += pos.realized_pnl
-    if pos.side == 1:
-        s["locked_realized_long"] += pos.realized_pnl
+    if pos.close_reason == CloseReason.LIQUIDATION:
+        if pos.side == 1:
+            s["locked_liq_long"] += pos.realized_pnl
+        else:
+            s["locked_liq_short"] += pos.realized_pnl
     else:
-        s["locked_realized_short"] += pos.realized_pnl
+        if pos.side == 1:
+            s["locked_realized_long"] += pos.realized_pnl
+        else:
+            s["locked_realized_short"] += pos.realized_pnl
     s["locked_funding"] += pos.cumulative_funding
     s["locked_fees"] += pos.cumulative_fees
     if pos.close_reason == CloseReason.FORCE:
         s["n_closed"] += 1
+    return net_cash_loss
 
 
 def _execute_open(
@@ -233,7 +267,7 @@ def _execute_open(
         lp = order.limit_price
         if ohlc_row is None or not (math.isfinite(lp) and lp > 0):
             return None
-        if order.side == 1 and ohlc_row[2] > lp:   # long: low must reach limit
+        if order.side == 1 and ohlc_row[2] > lp:  # long: low must reach limit
             return None
         if order.side == -1 and ohlc_row[1] < lp:  # short: high must reach limit
             return None
@@ -258,7 +292,9 @@ def _execute_open(
         initial_margin=margin,
         notional=notional,
         expiry_mode=expiry_mode,
-        tranches=[(qty, abs_expiry_bar)] if expiry_mode == ExpiryMode.PROPORTIONAL else [],
+        tranches=(
+            [(qty, abs_expiry_bar)] if expiry_mode == ExpiryMode.PROPORTIONAL else []
+        ),
         mm_rate=mm_rate,
         cumulative_fees=fee,
         mark_price=fill_px,
@@ -353,8 +389,14 @@ def _net_against(
                 expiry_bars=order.expiry_bars,
             )
             return _execute_open(
-                rem_order, fill_px, fee_bps, ts, next_id, bucket,
-                mm_rate=mm_rate, abs_expiry_bar=abs_expiry_bar,
+                rem_order,
+                fill_px,
+                fee_bps,
+                ts,
+                next_id,
+                bucket,
+                mm_rate=mm_rate,
+                abs_expiry_bar=abs_expiry_bar,
                 expiry_mode=strategy.expiry_mode,
             )
     else:
@@ -453,6 +495,7 @@ def run_backtest(
     ranks_path: str,
     bt_cfg: BacktestConfig,
     verbose: bool = True,
+    detailed_output: bool = False,
 ) -> SimResult:
     sd = _prepare_sim_data(market, ranks_path)
     n_bars = len(sd.timeline)
@@ -470,6 +513,9 @@ def run_backtest(
     # per-perp cumulative contribution series
     per_perp_eq: Dict[str, np.ndarray] = {p: np.zeros(n_bars) for p in sd.perps}
     total_eq = np.zeros(n_bars)
+    # per-perp signed token quantity series (long > 0, short < 0)
+    per_perp_pos: Dict[str, np.ndarray] = {p: np.zeros(n_bars) for p in sd.perps}
+    liquidation_events: List[Dict[str, str]] = []
 
     next_id = 1
     fee_bps = bt_cfg.taker_fee_bps
@@ -501,7 +547,10 @@ def run_backtest(
 
             # Closes at this bar's open (forced fills override)
             for pos in closed_list:
-                if pos.close_reason == CloseReason.LIQUIDATION and pos.close_price is not None:
+                if (
+                    pos.close_reason == CloseReason.LIQUIDATION
+                    and pos.close_price is not None
+                ):
                     fill = pos.close_price
                 else:
                     o = ms.ohlc_row.get(pos.perp)
@@ -514,7 +563,15 @@ def run_backtest(
                     # Proportional partial close — position stays in bucket
                     _execute_partial_close(pos, pos.close_qty, fill, fee_bps, bucket)
                 else:
-                    _execute_close(pos, fill, fee_bps, bucket)
+                    net_cash_loss = _execute_close(pos, fill, fee_bps, bucket)
+                    if pos.close_reason == CloseReason.LIQUIDATION:
+                        liquidation_events.append(
+                            LiquidationEvent(
+                                timestamp=ms.timestamp.isoformat(),
+                                asset=pos.perp,
+                                net_cash_loss=net_cash_loss,
+                            )
+                        )
                     bucket.unregister_position(pos.perp, pos.side)
                     del bucket.current_positions[pos.id]
 
@@ -530,19 +587,36 @@ def run_backtest(
                 existing = bucket.get_position(order.perp, order.side)
                 opposing = bucket.get_position(order.perp, -order.side)
                 if existing is not None:
-                    _merge_into(existing, order, fill_px, fee_bps, ms.timestamp, bucket, abs_exp)
+                    _merge_into(
+                        existing, order, fill_px, fee_bps, ms.timestamp, bucket, abs_exp
+                    )
                 elif opposing is not None:
                     new_pos = _net_against(
-                        opposing, order, fill_px, fee_bps, ms.timestamp,
-                        next_id, bucket, abs_exp, strategy, ms.mm_rate_cache.get(order.perp, 0.05),
+                        opposing,
+                        order,
+                        fill_px,
+                        fee_bps,
+                        ms.timestamp,
+                        next_id,
+                        bucket,
+                        abs_exp,
+                        strategy,
+                        ms.mm_rate_cache.get(order.perp, 0.05),
                     )
                     if new_pos is not None:
                         next_id += 1
                 else:
                     placed = _execute_open(
-                        order, fill_px, fee_bps, ms.timestamp, next_id, bucket,
-                        ohlc_row=row, mm_rate=ms.mm_rate_cache.get(order.perp, 0.05),
-                        abs_expiry_bar=abs_exp, expiry_mode=strategy.expiry_mode,
+                        order,
+                        fill_px,
+                        fee_bps,
+                        ms.timestamp,
+                        next_id,
+                        bucket,
+                        ohlc_row=row,
+                        mm_rate=ms.mm_rate_cache.get(order.perp, 0.05),
+                        abs_expiry_bar=abs_exp,
+                        expiry_mode=strategy.expiry_mode,
                     )
                     if placed is not None:
                         next_id += 1
@@ -569,13 +643,23 @@ def run_backtest(
             contrib_per_perp[p] = base
         for pos in bucket.current_positions.values():
             contrib_per_perp[pos.perp] = contrib_per_perp.get(pos.perp, 0.0) + (
-                pos.realized_pnl + pos.unrealized_pnl + pos.cumulative_funding - pos.cumulative_fees
+                pos.realized_pnl
+                + pos.unrealized_pnl
+                + pos.cumulative_funding
+                - pos.cumulative_fees
             )
 
         for p in sd.perps:
             per_perp_eq[p][i] = contrib_per_perp.get(p, 0.0)
 
         total_eq[i] = bt_cfg.initial_equity + sum(contrib_per_perp.values())
+
+        # snapshot signed token qty: positive = long, negative = short
+        qty_snap: Dict[str, float] = {}
+        for pos in bucket.current_positions.values():
+            qty_snap[pos.perp] = qty_snap.get(pos.perp, 0.0) + pos.qty * pos.side
+        for p in sd.perps:
+            per_perp_pos[p][i] = qty_snap.get(p, 0.0)
 
     # Metrics
     metrics_total = _series_metrics(
@@ -595,19 +679,26 @@ def run_backtest(
     n_liq = sum(s["n_liquidated"] for s in bucket.stats_data_bucket.values())
 
     long_pnl = sum(s["locked_realized_long"] for s in bucket.stats_data_bucket.values())
-    short_pnl = sum(s["locked_realized_short"] for s in bucket.stats_data_bucket.values())
+    short_pnl = sum(
+        s["locked_realized_short"] for s in bucket.stats_data_bucket.values()
+    )
+    liq_long_pnl = sum(s["locked_liq_long"] for s in bucket.stats_data_bucket.values())
+    liq_short_pnl = sum(
+        s["locked_liq_short"] for s in bucket.stats_data_bucket.values()
+    )
     funding_pnl = sum(s["locked_funding"] for s in bucket.stats_data_bucket.values())
     total_fees = sum(s["locked_fees"] for s in bucket.stats_data_bucket.values())
 
-    if verbose:
+    if verbose and detailed_output:
         _print_table(strategy.name, metrics_per_perp, metrics_total)
-        print(f"  trades opened={n_opened}  closed={n_closed}  liquidated={n_liq}")
 
     return SimResult(
         strategy_name=strategy.name,
         timeline=sd.timeline,
         total_equity=total_eq,
         per_perp_equity=per_perp_eq,
+        per_perp_position=per_perp_pos,
+        liquidation_events=liquidation_events,
         metrics_total=metrics_total,
         metrics_per_perp=metrics_per_perp,
         n_opened=int(n_opened),
@@ -615,6 +706,8 @@ def run_backtest(
         n_liquidated=int(n_liq),
         long_pnl=float(long_pnl),
         short_pnl=float(short_pnl),
+        liq_long_pnl=float(liq_long_pnl),
+        liq_short_pnl=float(liq_short_pnl),
         funding_pnl=float(funding_pnl),
         total_fees=float(total_fees),
     )
@@ -631,17 +724,119 @@ def log_results(result: SimResult, path: str) -> None:
         "timeline": [ts.isoformat() for ts in result.timeline],
         "total_equity": result.total_equity.tolist(),
         "per_perp_equity": {
+            p: arr.tolist() for p, arr in result.per_perp_equity.items() if p in traded
+        },
+        "per_perp_position": {
             p: arr.tolist()
-            for p, arr in result.per_perp_equity.items()
+            for p, arr in result.per_perp_position.items()
             if p in traded
         },
+        "liquidation_events": [
+            {
+                "timestamp": e.timestamp,
+                "asset": e.asset,
+                "net_cash_loss": e.net_cash_loss,
+            }
+            for e in result.liquidation_events
+        ],
         "metrics_total": result.metrics_total,
         "metrics_per_perp": result.metrics_per_perp,
         "n_opened": result.n_opened,
         "n_closed": result.n_closed,
         "n_liquidated": result.n_liquidated,
+        "long_pnl": result.long_pnl,
+        "short_pnl": result.short_pnl,
+        "liq_long_pnl": result.liq_long_pnl,
+        "liq_short_pnl": result.liq_short_pnl,
+        "funding_pnl": result.funding_pnl,
+        "total_fees": result.total_fees,
     }
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, separators=(",", ":"))
+
+
+def print_result_summary(result: SimResult, saved_path: Optional[str] = None) -> None:
+    """Pretty terminal summary for one strategy run."""
+
+    SEP = "─" * 56
+
+    net_pnl = (
+        result.long_pnl
+        + result.short_pnl
+        + result.liq_long_pnl
+        + result.liq_short_pnl
+        + result.funding_pnl
+        - result.total_fees
+    )
+
+    positions_total = result.long_pnl + result.short_pnl
+    liq_total = result.liq_long_pnl + result.liq_short_pnl
+
+    title = f" {result.strategy_name} "
+    side = "─" * 20
+
+    print()
+    print(f"  | {side} |{title}| {side} |")
+    print()
+
+    # Trades
+    print("  Trades")
+    print(f"  {SEP}")
+    print(f"  {'Opened':<14}{result.n_opened:>8}")
+    print(f"  {'Closed':<14}{result.n_closed:>8}")
+    print(f"  {'Liquidated':<14}{result.n_liquidated:>8}")
+
+    print()
+
+    # PnL
+    print("  PnL Breakdown")
+    print(f"  {SEP}")
+
+    # column widths
+    label_w = 16
+    col_w = 13
+
+    print(
+        f"  {'':<{label_w}}"
+        f"{'LONG':>{col_w}}"
+        f"{'SHORT':>{col_w}}"
+        f"{'TOTAL':>{col_w}}"
+    )
+
+    print(
+        f"  {'Positions':<{label_w}}"
+        f"{result.long_pnl:+{col_w},.2f}"
+        f"{result.short_pnl:+{col_w},.2f}"
+        f"{positions_total:+{col_w},.2f}"
+    )
+
+    print(
+        f"  {'Liquidations':<{label_w}}"
+        f"{result.liq_long_pnl:+{col_w},.2f}"
+        f"{result.liq_short_pnl:+{col_w},.2f}"
+        f"{liq_total:+{col_w},.2f}"
+    )
+
+    print()
+
+    # align exactly under TOTAL column
+    total_col_start = label_w + (col_w * 2)
+
+    print(f"  {'Funding':<{total_col_start}}" f"{result.funding_pnl:+{col_w},.2f}")
+
+    print(f"  {'Fees':<{total_col_start}}" f"{-result.total_fees:+{col_w},.2f}")
+
+    print()
+    print(f"  {SEP}")
+
+    print(f"  {'NET PnL':<{total_col_start}}" f"{net_pnl:+{col_w},.2f}")
+
+    print(f"  {SEP}")
+
+    if saved_path:
+        print()
+        print("  Saved →")
+        print(f"  {saved_path}")
+        print(f"  {SEP}")
