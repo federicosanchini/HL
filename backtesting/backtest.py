@@ -164,8 +164,8 @@ class BacktestConfig:
     initial_equity: float = 2000.0
     notional_per_trade: float = 10.0
     leverage: float = 1.0
-    margin_mode: str = "isolated"
-    start_date: Optional[str] = "2025-10-10"
+    margin_mode: str = "cross"
+    start_date: Optional[str] = "2025-06-05"
     end_date: Optional[str] = None
     holding_days: Optional[float] = 30.0
     stop_at_last_signal_date: bool = True
@@ -178,6 +178,7 @@ class BacktestConfig:
     close_at_end: bool = True
     min_prediction_rows_per_day: int = 2
     force_exact_universe: bool = True
+    use_oracle_ohlc_fallback: bool = True
 
 
 class HyperliquidBacktester:
@@ -448,6 +449,7 @@ class HyperliquidBacktester:
         funding = funding.sort_values(["time", "perp"]).drop_duplicates(["time", "perp"], keep="last")
         oracle = oracle.sort_values(["time", "perp"]).drop_duplicates(["time", "perp"], keep="last")
 
+        start_ts = None
         if self.cfg.start_date:
             start_ts = pd.Timestamp(self.cfg.start_date, tz="UTC")
             ohlc = ohlc[ohlc["time"] >= start_ts].copy()
@@ -468,11 +470,48 @@ class HyperliquidBacktester:
                     f"stop_at_last_signal_date={self.cfg.stop_at_last_signal_date}."
                 )
 
+        if self.cfg.use_oracle_ohlc_fallback and not oracle.empty:
+            existing_keys = ohlc[["perp", "time"]].drop_duplicates()
+            oracle_missing = oracle.merge(existing_keys, on=["perp", "time"], how="left", indicator=True)
+            oracle_missing = oracle_missing[oracle_missing["_merge"] == "left_only"].drop(columns=["_merge"])
+            if not oracle_missing.empty:
+                fallback = pd.DataFrame({
+                    "perp": oracle_missing["perp"],
+                    "time": oracle_missing["time"],
+                    "open": oracle_missing["oraclePx"],
+                    "high": oracle_missing["oraclePx"],
+                    "low": oracle_missing["oraclePx"],
+                    "close": oracle_missing["oraclePx"],
+                    "volume": np.nan,
+                    "num_trades": np.nan,
+                    "price_source": "oracle_fallback",
+                })
+                ohlc = ohlc.copy()
+                ohlc["price_source"] = "ohlc"
+                ohlc = pd.concat([ohlc, fallback], ignore_index=True, sort=False)
+                ohlc = ohlc.sort_values(["time", "perp"]).drop_duplicates(["time", "perp"], keep="first")
+                self.prediction_metadata["oracle_ohlc_fallback_rows_added"] = int(len(fallback))
+                self.prediction_metadata["oracle_ohlc_fallback_symbols"] = int(fallback["perp"].nunique())
+            else:
+                self.prediction_metadata["oracle_ohlc_fallback_rows_added"] = 0
+                self.prediction_metadata["oracle_ohlc_fallback_symbols"] = 0
+        else:
+            self.prediction_metadata["oracle_ohlc_fallback_rows_added"] = 0
+            self.prediction_metadata["oracle_ohlc_fallback_symbols"] = 0
+
         self.prediction_metadata["configured_end_date"] = self.cfg.end_date
         self.prediction_metadata["stop_at_last_signal_date"] = bool(self.cfg.stop_at_last_signal_date)
+        self.prediction_metadata["use_oracle_ohlc_fallback"] = bool(self.cfg.use_oracle_ohlc_fallback)
         self.prediction_metadata["effective_market_end_exclusive"] = str(end_exclusive) if end_exclusive is not None else None
         self.prediction_metadata["market_time_min_after_filters"] = str(ohlc["time"].min()) if not ohlc.empty else None
         self.prediction_metadata["market_time_max_after_filters"] = str(ohlc["time"].max()) if not ohlc.empty else None
+        if start_ts is not None and not ohlc.empty:
+            first_ohlc_by_symbol = ohlc.groupby("perp")["time"].min().sort_values()
+            delayed_ohlc = first_ohlc_by_symbol[first_ohlc_by_symbol > start_ts]
+            self.prediction_metadata["ohlc_symbols_starting_after_start_date"] = int(len(delayed_ohlc))
+            self.prediction_metadata["ohlc_symbols_starting_after_start_date_sample"] = {
+                sym: str(ts) for sym, ts in delayed_ohlc.head(50).items()
+            }
 
         return ohlc, funding, oracle
 
@@ -563,12 +602,24 @@ class HyperliquidBacktester:
 
             candidates = g[(g["time"] >= start) & (g["time"] <= end)]
             if candidates.empty:
+                first_price_time = g["time"].min()
+                last_price_time = g["time"].max()
+                if pd.notna(first_price_time) and first_price_time > end:
+                    reason = "ohlc_starts_after_entry_window"
+                elif pd.notna(last_price_time) and last_price_time < start:
+                    reason = "ohlc_ends_before_entry_window"
+                else:
+                    reason = "no_price_inside_entry_window"
                 skipped.append({
                     "signal_date": row.signal_date,
                     "symbol": row.symbol,
                     "side": row.side,
                     "prediction": row.prediction,
-                    "reason": "no_price_inside_entry_window",
+                    "reason": reason,
+                    "first_ohlc_time": first_price_time,
+                    "last_ohlc_time": last_price_time,
+                    "entry_window_start": start,
+                    "entry_window_end": end,
                 })
                 continue
 
@@ -1312,10 +1363,10 @@ class HyperliquidBacktester:
         schedule.to_csv(self.cfg.output_dir / "scheduled_trades.csv", index=False)
         with open(self.cfg.output_dir / "prediction_input_report.json", "w") as f:
             json.dump(make_json_safe(self.prediction_metadata), f, indent=2, default=str)
-        if self.skipped_signal_records:
-            pd.DataFrame(self.skipped_signal_records).to_csv(
-                self.cfg.output_dir / "skipped_signals.csv", index=False
-            )
+        skipped = pd.DataFrame(self.skipped_signal_records)
+        if skipped.empty:
+            skipped = pd.DataFrame(columns=["signal_date", "symbol", "side", "prediction", "reason"])
+        skipped.to_csv(self.cfg.output_dir / "skipped_signals.csv", index=False)
 
         # Pre-group for fast hourly loop.
         ohlc_by_time = {t: g.copy() for t, g in ohlc.groupby("time", sort=True)}
@@ -1911,6 +1962,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entry-hour-utc", type=int, default=19)
     parser.add_argument("--max-entry-delay-hours", type=int, default=1)
     parser.add_argument("--execution-price-col", type=str, default="open", choices=["open", "high", "low", "close"])
+    parser.add_argument("--no-oracle-ohlc-fallback", action="store_true",
+                        help="Do not synthesize missing OHLC rows from oracle_price.csv. Useful when you require real high/low candles only.")
     parser.add_argument("--no-close-at-end", action="store_true")
     return parser.parse_args()
 
@@ -1955,6 +2008,7 @@ def main() -> None:
         entry_hour_utc=args.entry_hour_utc,
         max_entry_delay_hours=args.max_entry_delay_hours,
         execution_price_col=args.execution_price_col,
+        use_oracle_ohlc_fallback=not args.no_oracle_ohlc_fallback,
         close_at_end=not args.no_close_at_end,
     )
 
