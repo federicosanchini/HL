@@ -1,0 +1,89 @@
+# src/genome/adapter.py
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Tuple
+
+from src import OrderCommand
+
+from .genes import EntryLedger
+from .registry import build_gene
+
+
+@dataclass(frozen=True)
+class GeneSpec:
+    kind: str
+    params: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Genome:
+    name: str
+    universe_filter: GeneSpec
+    signal: GeneSpec
+    entry_timing: GeneSpec
+    sizing: GeneSpec
+    exit_rule: GeneSpec
+    n_long: int = 2
+    n_short: int = 2
+    margin_mode: str = "cross"
+
+
+def select_longs_shorts(
+    scores: Dict[str, float],
+    n_long: int,
+    n_short: int,
+    held: Set[str],
+) -> Tuple[List[str], List[str]]:
+    cands = sorted(scores.items(), key=lambda t: (t[1], t[0]))
+    if len(cands) < 2:
+        return [], []
+    shorts = [a for a, _ in cands[:n_short]]
+    longs = [a for a, _ in cands[-n_long:]]
+    long_set = set(longs)
+    shorts = [a for a in shorts if a not in long_set]
+    longs = [a for a in longs if a not in held]
+    shorts = [a for a in shorts if a not in held]
+    return longs, shorts
+
+
+class ComposedTrader:
+    """A Trader assembled from five genes; run(state) drives a fixed pipeline."""
+
+    def __init__(self, genome: Genome, uf, sig, timing, sizing, exit_rule) -> None:
+        self.name = genome.name
+        self.margin_mode = genome.margin_mode
+        self._genome = genome
+        self._uf = uf
+        self._sig = sig
+        self._timing = timing
+        self._sizing = sizing
+        self._exit = exit_rule
+        self._ledger = EntryLedger()
+
+    def run(self, state) -> List[OrderCommand]:
+        self._ledger.prune(set(state.positions))
+        orders: List[OrderCommand] = list(self._exit.exits(state, self._ledger))
+        if self._timing.should_enter(state):
+            universe = self._uf.eligible(state)
+            scores = self._sig.score(state, universe)
+            held = set(state.positions)
+            longs, shorts = select_longs_shorts(
+                scores, self._genome.n_long, self._genome.n_short, held
+            )
+            entry_orders = self._sizing.orders_for(state, longs, shorts)
+            for order in entry_orders:
+                mv = state.market.get(order.asset)
+                if mv is not None:
+                    self._ledger.record(order.asset, state.bar_index, mv.mark_px)
+            orders.extend(entry_orders)
+        return orders
+
+
+def build_trader(genome: Genome) -> ComposedTrader:
+    uf = build_gene("universe_filter", genome.universe_filter.kind, genome.universe_filter.params)
+    sig = build_gene("signal", genome.signal.kind, genome.signal.params)
+    timing = build_gene("entry_timing", genome.entry_timing.kind, genome.entry_timing.params)
+    sizing = build_gene("sizing", genome.sizing.kind, genome.sizing.params)
+    exit_rule = build_gene("exit_rule", genome.exit_rule.kind, genome.exit_rule.params)
+    return ComposedTrader(genome, uf, sig, timing, sizing, exit_rule)
