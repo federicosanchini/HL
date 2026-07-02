@@ -14,6 +14,7 @@ from .position import (
     ExecutionEvent,
     FundingEvent,
     LiquidationEvent,
+    OrderCommand,
     OrderRejectedEvent,
     Position,
     normalize_margin_mode,
@@ -138,6 +139,23 @@ class MarketState:
         )
 
 
+@dataclass(frozen=True)
+class PendingOrder:
+    """A market-like order queued at bar i's strategy decision, filled at open[i+1] (R1)."""
+
+    order: OrderCommand
+    queued_ts: pd.Timestamp
+    queued_bar: int
+
+
+@dataclass(frozen=True)
+class RestingTrigger:
+    """A validated TRIGGER order resting on an asset, evaluated intrabar (R2/R3)."""
+
+    order: OrderCommand
+    placed_bar: int
+
+
 @dataclass
 class StateBucket:
     """Mutable account state shared by engine internals."""
@@ -151,6 +169,8 @@ class StateBucket:
     funding_events: List[FundingEvent] = field(default_factory=list)
     liquidation_events: List[LiquidationEvent] = field(default_factory=list)
     margin_mode: str = "cross"
+    pending_orders: List[PendingOrder] = field(default_factory=list)
+    resting_triggers: Dict[str, List[RestingTrigger]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.margin_mode = normalize_margin_mode(self.margin_mode)
