@@ -10,7 +10,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from .execution import _apply_delta
+from .execution import EPS, _apply_delta
 from .position import OrderCommand, OrderRejectedEvent
 from .state import MarketState, RestingTrigger, StateBucket
 
@@ -141,6 +141,7 @@ def fill_triggers(
     ms: MarketState,
     fee_bps: float,
     suppress: FrozenSet[str],
+    only_assets: Optional[FrozenSet[str]] = None,
 ) -> None:
     """Evaluate and fill resting triggers per R3 (fire/fill matrix) + R4 (worst-fill
     selection on same-bar multi-fire) + size clamp.
@@ -149,8 +150,14 @@ def fill_triggers(
     precedence) are skipped entirely — their triggers stay resting untouched.
     Triggers placed at the current bar (`placed_bar >= ms.bar_index`) are not
     yet active (R2) and are skipped for firing but remain resting.
+
+    `only_assets`, if given, restricts evaluation to exactly that asset set
+    (used by `execute_deferred_triggers` for the R5 deferred clause); `None`
+    (default) evaluates every resting asset, preserving the original signature
+    used by the R3/R4 main pass.
     """
-    for asset in sorted(bucket.resting_triggers):
+    asset_iter = sorted(only_assets) if only_assets is not None else sorted(bucket.resting_triggers)
+    for asset in asset_iter:
         if asset in suppress:
             continue
         triggers = bucket.resting_triggers.get(asset, [])
@@ -207,3 +214,79 @@ def fill_triggers(
 
         if asset not in bucket.positions_by_asset:
             auto_cancel_triggers(bucket, asset)
+
+
+def precedence_scan(bucket: StateBucket, ms: MarketState) -> FrozenSet[str]:
+    """R5 conservative liquidation-precedence scan. Pure — reads only, never mutates.
+
+    Only assets carrying >=1 resting trigger are scanned: an asset with no
+    resting triggers has nothing R3 could fire this bar, so a suppression
+    verdict for it would be inert. Harmless to widen, but pointless.
+
+    For each candidate position (sorted asset order), the position is marked
+    at its adverse extreme (long -> eff_low, short -> eff_high, via
+    `ms.bar_range` and its R3 NaN fallback) while every OTHER position is
+    marked at this bar's open (`ms.trade_px`) — never at close. Breach uses
+    the same `equity < maintenance - EPS` convention as
+    `execution.liquidate_if_needed`:
+      - cross: portfolio equity/maintenance across all positions at those marks.
+      - isolated: per-position isolated equity/maintenance at the extreme mark.
+    Breached assets are returned in the suppress set.
+    """
+    breached: List[str] = []
+    candidates = sorted(
+        asset
+        for asset, triggers in bucket.resting_triggers.items()
+        if triggers and bucket.get_position(asset) is not None
+    )
+
+    for asset in candidates:
+        pos = bucket.get_position(asset)
+        if pos is None or pos.size == 0:
+            continue
+        eff_high, eff_low = ms.bar_range(asset)
+        extreme = eff_low if pos.side == 1 else eff_high
+
+        if bucket.margin_mode == "isolated":
+            upnl_at_extreme = pos.size * (extreme - pos.entry_price)
+            isolated_equity = (
+                pos.isolated_margin
+                + upnl_at_extreme
+                + pos.cumulative_funding
+                - pos.cumulative_fees
+            )
+            maintenance = abs(pos.size) * extreme * pos.mm_rate
+            if isolated_equity < maintenance - EPS:
+                breached.append(asset)
+            continue
+
+        equity = bucket.cash
+        maintenance = 0.0
+        for other_asset, other in bucket.positions_by_asset.items():
+            mark = extreme if other_asset == asset else ms.trade_px(other_asset)
+            equity += other.size * (mark - other.entry_price)
+            maintenance += abs(other.size) * mark * other.mm_rate
+        if equity < maintenance - EPS:
+            breached.append(asset)
+
+    return frozenset(breached)
+
+
+def execute_deferred_triggers(
+    bucket: StateBucket,
+    ms: MarketState,
+    fee_bps: float,
+    suppressed: FrozenSet[str],
+) -> None:
+    """R5 deferred clause: fire suppressed-but-fired triggers whose asset survived
+    the close-mark liquidation pass (`liquidate_if_needed`), same bar.
+
+    Assets in `suppressed` whose position was liquidated (no longer present in
+    `bucket.positions_by_asset`) are left alone — liquidation strictly won and
+    already auto-cancelled their resting triggers. Surviving assets get the
+    normal R3/R4 fire/fill pass, restricted to exactly that asset set.
+    """
+    surviving = frozenset(asset for asset in suppressed if bucket.get_position(asset) is not None)
+    if not surviving:
+        return
+    fill_triggers(bucket, ms, fee_bps, suppress=frozenset(), only_assets=surviving)
