@@ -36,10 +36,14 @@ def select_longs_shorts(
     held: Set[str],
 ) -> Tuple[List[str], List[str]]:
     cands = sorted(scores.items(), key=lambda t: (t[1], t[0]))
-    if len(cands) < 2:
+    # two-sided books need >= 2 candidates (legacy SLTP semantics);
+    # one-sided books are legitimate with a single candidate
+    two_sided = n_long > 0 and n_short > 0
+    if not cands or (two_sided and len(cands) < 2):
         return [], []
-    shorts = [a for a, _ in cands[:n_short]]
-    longs = [a for a, _ in cands[-n_long:]]
+    # n <= 0 must yield an empty side: cands[-0:] is the WHOLE list
+    shorts = [a for a, _ in cands[:n_short]] if n_short > 0 else []
+    longs = [a for a, _ in cands[-n_long:]] if n_long > 0 else []
     long_set = set(longs)
     shorts = [a for a in shorts if a not in long_set]
     longs = [a for a in longs if a not in held]
