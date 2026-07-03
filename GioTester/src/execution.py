@@ -172,8 +172,15 @@ def execute_order(
     fee_bps: float,
     min_notional_usd: float,
     mm_rate: float,
+    mark_px_override: Optional[float] = None,
 ) -> None:
-    """Execute or reject a single strategy command."""
+    """Execute or reject a single strategy command.
+
+    ``mark_px_override``, when supplied (R1 pending-fill pass), replaces
+    ``ms.mark_px(order.asset)`` everywhere inside this call: the hypothetical
+    position's mark for margin/leverage checks and the post-fill position mark.
+    Default ``None`` reads ``ms.mark_px`` exactly as before (byte-identical).
+    """
     try:
         order.validate_basic()
     except ValueError as exc:
@@ -188,7 +195,7 @@ def execute_order(
 
     try:
         trade_px = ms.trade_px(order.asset)
-        mark_px = ms.mark_px(order.asset)
+        mark_px = ms.mark_px(order.asset) if mark_px_override is None else float(mark_px_override)
         fill_px = _fill_price(order, trade_px)
     except ValueError as exc:
         bucket.rejected_orders.append(_reject(order, ms, str(exc)))

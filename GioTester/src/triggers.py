@@ -79,13 +79,39 @@ def place_triggers(
                 continue
 
             bucket.resting_triggers[asset].append(
-                RestingTrigger(order=order, placed_bar=ms.bar_index)
+                RestingTrigger(
+                    order=order,
+                    placed_bar=ms.bar_index,
+                    placed_side=existing.side,
+                )
             )
 
 
 def auto_cancel_triggers(bucket: StateBucket, asset: str) -> None:
     """Drop all resting triggers for `asset` (position reached flat or flipped)."""
     bucket.resting_triggers.pop(asset, None)
+
+
+def sweep_stale_triggers(bucket: StateBucket) -> None:
+    """Cancel resting triggers orphaned by a position removal or side flip.
+
+    Called by the runner after every step that can remove or flip a position
+    (pending fills, trigger fills, liquidation passes, deferred fills,
+    force-closes). An asset's resting triggers are dropped when the position is
+    gone (or flat) or its side no longer matches the side recorded at placement.
+    Triggers constructed without a known `placed_side` (default 0, legacy/test
+    constructions) are never swept on the side-mismatch criterion.
+    """
+    for asset in list(bucket.resting_triggers):
+        triggers = bucket.resting_triggers.get(asset)
+        if not triggers:
+            continue
+        pos = bucket.get_position(asset)
+        if pos is None or pos.size == 0:
+            auto_cancel_triggers(bucket, asset)
+            continue
+        if any(t.placed_side != 0 and t.placed_side != pos.side for t in triggers):
+            auto_cancel_triggers(bucket, asset)
 
 
 def trigger_fill_px(

@@ -154,6 +154,7 @@ class RestingTrigger:
 
     order: OrderCommand
     placed_bar: int
+    placed_side: int = 0
 
 
 @dataclass
