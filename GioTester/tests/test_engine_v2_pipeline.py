@@ -248,3 +248,13 @@ def test_liquidation_cancels_resting_triggers():
     assert any(e.asset == "SYN" for e in result.liquidation_events)
     assert all(e.reason != "trigger" for e in result.execution_events)
     assert result.n_liquidated >= 1
+
+
+# --- (x) version stamp (R8) --------------------------------------------------
+
+def test_result_stamps_engine_semantics_version():
+    sd = build_sim_data({
+        "SYN": [[100, 100, 100, 100], [110, 110, 110, 110], [120, 120, 120, 120]],
+    })
+    result = run_scripted(sd, {0: [market_order("SYN", 1, notional=100.0)]})
+    assert result.engine_semantics_version == 2

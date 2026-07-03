@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Engine semantics version stamped into every SimResult (spec R8). Bump only
+# on a normative change to matching/fire/fill/liquidation semantics.
+ENGINE_SEMANTICS_VERSION = 2
+
 import dataclasses
 import math
 from typing import Dict, List, Protocol
@@ -341,6 +345,7 @@ def run_backtest_prepared(
     return SimResult(
         strategy_name=strategy_name,
         margin_mode=margin_mode,
+        engine_semantics_version=ENGINE_SEMANTICS_VERSION,
         timeline=sd.timeline,
         total_equity=total_eq,
         per_perp_equity=per_perp_eq,

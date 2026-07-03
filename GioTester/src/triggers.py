@@ -11,7 +11,7 @@ import dataclasses
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from .execution import EPS, _apply_delta
-from .position import OrderCommand, OrderRejectedEvent
+from .position import CloseReason, OrderCommand, OrderRejectedEvent
 from .state import MarketState, RestingTrigger, StateBucket
 
 
@@ -235,7 +235,7 @@ def fill_triggers(
             fee,
             bucket,
             ms,
-            reason="trigger",
+            reason=CloseReason.TRIGGER.value,
         )
 
         if asset not in bucket.positions_by_asset:
