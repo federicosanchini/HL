@@ -1,8 +1,19 @@
 # src/genome/library.py
+"""Gene library (Phase T taxonomy v1).
+
+Composition constraint (Task T2): `entry_timing`/`delay` fires on non-release
+bars (k bars after the most recent release), where `state.current_ranks_row`
+is None. Plain `signal`/`rank` and `signal`/`rank_30d` read that row directly
+and return {} off-release, which would starve `delay`-timed entries. `delay`
+must therefore be composed with a *_cached rank signal (`rank_cached`,
+`rank_30d_cached`) or a non-rank signal (`momentum`, `funding_carry`). The
+Phase 1 sweep generator must respect this pairing when enumerating genomes.
+"""
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Set
+from collections import deque
+from typing import Deque, Dict, List, Optional, Set
 
 from src import OrderCommand, OrderType
 
@@ -40,6 +51,127 @@ class RankSignal:
         return out
 
 
+@register("signal", "rank_30d")
+class Rank30dSignal(RankSignal):
+    """RankSignal locked to field_index=1 (30-day horizon prediction column).
+
+    Distinct kind from `rank` for mechanism accounting (macro-plan §2) even
+    though the implementation is a thin subclass.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        kwargs.pop("field_index", None)
+        super().__init__(field_index=1, **kwargs)
+
+
+class _CachedRankSignal:
+    """RankSignal variant that caches the last non-None `current_ranks_row`.
+
+    observe() latches the most recently seen release row so score() keeps
+    returning values on non-release bars (the row itself is None there).
+    Requires the adapter's observe hook to be driven every bar. See module
+    docstring for the `delay`-timing pairing constraint.
+    """
+
+    def __init__(self, *, field_index: int = 0, **_) -> None:
+        self.field_index = int(field_index)
+        self._cached_row: Optional[Dict[str, tuple]] = None
+
+    def observe(self, state) -> None:
+        if state.current_ranks_row is not None:
+            self._cached_row = state.current_ranks_row
+
+    def score(self, state, universe: Set[str]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        row = self._cached_row
+        if not row:
+            return out
+        for asset, preds in row.items():
+            if asset not in universe:
+                continue
+            sig = preds[self.field_index]
+            if math.isfinite(sig):
+                out[asset] = float(sig)
+        return out
+
+
+@register("signal", "rank_cached")
+class RankCachedSignal(_CachedRankSignal):
+    """Cached variant of `rank` (field_index=0 by default); see _CachedRankSignal."""
+
+
+@register("signal", "rank_30d_cached")
+class Rank30dCachedSignal(_CachedRankSignal):
+    """Cached variant of `rank_30d`, locked to field_index=1."""
+
+    def __init__(self, **kwargs) -> None:
+        kwargs.pop("field_index", None)
+        super().__init__(field_index=1, **kwargs)
+
+
+@register("signal", "momentum")
+class MomentumSignal:
+    """Trailing price-momentum score: px_now / px_then - 1 over `lookback_bars`.
+
+    Stateful: observe() must be driven every bar (adapter observe hook) to
+    accumulate a per-asset `mark_px` deque of length `lookback_bars + 1`.
+    score() only emits a value for assets with a FULL window that are also in
+    `universe`; assets with insufficient history are skipped entirely (never
+    zero-filled). Deque insertion order is per-asset chronological and
+    dict-iteration order across assets does not affect the output (the result
+    is filtered to `universe`; downstream selection sorts by score).
+    """
+
+    def __init__(self, *, lookback_bars: int = 72, **_) -> None:
+        self.lookback_bars = int(lookback_bars)
+        self._history: Dict[str, Deque[float]] = {}
+
+    def observe(self, state) -> None:
+        for asset, mv in state.market.items():
+            px = mv.mark_px
+            if not math.isfinite(px):
+                continue
+            dq = self._history.get(asset)
+            if dq is None:
+                dq = deque(maxlen=self.lookback_bars + 1)
+                self._history[asset] = dq
+            dq.append(px)
+
+    def score(self, state, universe: Set[str]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for asset in universe:
+            dq = self._history.get(asset)
+            if dq is None or len(dq) < self.lookback_bars + 1:
+                continue
+            px_then, px_now = dq[0], dq[-1]
+            if not (math.isfinite(px_then) and px_then != 0.0 and math.isfinite(px_now)):
+                continue
+            out[asset] = px_now / px_then - 1.0
+        return out
+
+
+@register("signal", "funding_carry")
+class FundingCarrySignal:
+    """Score = -funding_rate for universe assets with a finite funding rate.
+
+    Stateless: shorts expensive-to-hold longs (positive funding), longs
+    negative-funding assets (gets paid to hold).
+    """
+
+    def __init__(self, **_) -> None:
+        pass
+
+    def score(self, state, universe: Set[str]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for asset, mv in state.market.items():
+            if asset not in universe:
+                continue
+            rate = mv.funding_rate
+            if math.isfinite(rate):
+                out[asset] = -float(rate)
+        return out
+
+
 @register("entry_timing", "release_bar")
 class ReleaseBarTiming:
     """Enter only on a signal-release bar."""
@@ -49,6 +181,32 @@ class ReleaseBarTiming:
 
     def should_enter(self, state) -> bool:
         return bool(state.is_release_bar and state.current_ranks_row)
+
+
+@register("entry_timing", "delay")
+class DelayTiming:
+    """Enter exactly `bars_after_release` bars after the most recent release bar.
+
+    Stateful: observe() must be driven every bar (adapter observe hook) to
+    latch release-bar indices even on bars where should_enter() itself isn't
+    otherwise consulted. Re-arms on every subsequent release bar (the most
+    recent one wins). Fires on exactly one bar per release cycle -- one bar
+    earlier or later returns False. Composes only with *_cached rank signals
+    or non-rank signals (`momentum`, `funding_carry`); see module docstring.
+    """
+
+    def __init__(self, *, bars_after_release: int = 24, **_) -> None:
+        self.bars_after_release = int(bars_after_release)
+        self._last_release_bar: Optional[int] = None
+
+    def observe(self, state) -> None:
+        if state.is_release_bar and state.current_ranks_row:
+            self._last_release_bar = state.bar_index
+
+    def should_enter(self, state) -> bool:
+        if self._last_release_bar is None:
+            return False
+        return (state.bar_index - self._last_release_bar) == self.bars_after_release
 
 
 @register("sizing", "fixed_notional")

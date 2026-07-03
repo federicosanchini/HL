@@ -68,6 +68,13 @@ class ComposedTrader:
         self._ledger = EntryLedger()
 
     def run(self, state) -> List[OrderCommand]:
+        # Observe hook (Task T2): stateful genes (momentum signal, cached-rank
+        # signals, delay timing, ...) need every bar, not just the bars their
+        # score()/should_enter() are consulted on. Fixed order, additive,
+        # optional (hasattr) -- does not change the existing pipeline contract.
+        for gene in (self._uf, self._sig, self._timing, self._sizing, self._exit):
+            if hasattr(gene, "observe"):
+                gene.observe(state)
         self._ledger.prune(set(state.positions))
         # R7 level anchoring: refresh each held position's ledger price from the
         # realized entry_price (the actual open[i+1] fill) every bar. This is
