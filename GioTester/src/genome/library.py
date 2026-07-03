@@ -13,6 +13,9 @@ from .registry import register
 class AllTradableFilter:
     """Every asset that has a market view this bar is eligible."""
 
+    def __init__(self, **_) -> None:
+        pass
+
     def eligible(self, state) -> Set[str]:
         return set(state.market.keys())
 
@@ -21,7 +24,7 @@ class AllTradableFilter:
 class RankSignal:
     """Score = the prediction at `field_index` from the release-bar ranks row."""
 
-    def __init__(self, *, field_index: int = 0) -> None:
+    def __init__(self, *, field_index: int = 0, **_) -> None:
         self.field_index = int(field_index)
 
     def score(self, state, universe: Set[str]) -> Dict[str, float]:
@@ -40,6 +43,9 @@ class RankSignal:
 @register("entry_timing", "release_bar")
 class ReleaseBarTiming:
     """Enter only on a signal-release bar."""
+
+    def __init__(self, **_) -> None:
+        pass
 
     def should_enter(self, state) -> bool:
         return bool(state.is_release_bar and state.current_ranks_row)

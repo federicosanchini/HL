@@ -27,6 +27,8 @@ class Genome:
     n_long: int = 2
     n_short: int = 2
     margin_mode: str = "cross"
+    leverage: float = 1.0
+    min_notional_usd: float = 10.0
 
 
 def select_longs_shorts(
@@ -95,10 +97,23 @@ class ComposedTrader:
         return orders
 
 
+def _merged_params(genome: Genome, spec: GeneSpec) -> dict:
+    """Merge genome-level knobs into a slot's params (genome overrides on collision)."""
+    return {
+        **spec.params,
+        "leverage": genome.leverage,
+        "min_notional_usd": genome.min_notional_usd,
+    }
+
+
 def build_trader(genome: Genome) -> ComposedTrader:
-    uf = build_gene("universe_filter", genome.universe_filter.kind, genome.universe_filter.params)
-    sig = build_gene("signal", genome.signal.kind, genome.signal.params)
-    timing = build_gene("entry_timing", genome.entry_timing.kind, genome.entry_timing.params)
-    sizing = build_gene("sizing", genome.sizing.kind, genome.sizing.params)
-    exit_rule = build_gene("exit_rule", genome.exit_rule.kind, genome.exit_rule.params)
+    uf = build_gene(
+        "universe_filter", genome.universe_filter.kind, _merged_params(genome, genome.universe_filter)
+    )
+    sig = build_gene("signal", genome.signal.kind, _merged_params(genome, genome.signal))
+    timing = build_gene(
+        "entry_timing", genome.entry_timing.kind, _merged_params(genome, genome.entry_timing)
+    )
+    sizing = build_gene("sizing", genome.sizing.kind, _merged_params(genome, genome.sizing))
+    exit_rule = build_gene("exit_rule", genome.exit_rule.kind, _merged_params(genome, genome.exit_rule))
     return ComposedTrader(genome, uf, sig, timing, sizing, exit_rule)

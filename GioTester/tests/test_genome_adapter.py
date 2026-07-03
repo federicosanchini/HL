@@ -99,3 +99,55 @@ def test_run_entry_decision_bar_emits_no_triggers():
     assert orders  # entries were emitted
     assert all(o.order_type != "trigger" for o in orders)
     assert all(o.trigger_px is None and o.trigger_direction is None for o in orders)
+
+
+# --- genome-level knob hoist (leverage / min_notional_usd) ------------------
+
+
+def test_genome_leverage_propagates_to_entry_and_trigger_orders():
+    genome = _bracket_genome()
+    genome = Genome(**{**genome.__dict__, "leverage": 2.0})
+    trader = build_trader(genome)
+
+    entry_orders = trader.run(_release_state())
+    assert entry_orders
+    assert all(o.leverage == 2.0 for o in entry_orders)
+
+    market = {"AAA": market_view("AAA", 112.0)}
+    positions = {"AAA": position_view("AAA", size=0.1, entry_price=100.0, mark_price=112.0)}
+    state = make_state(bar_index=1, market=market, positions=positions, is_release=False)
+    exit_orders = trader.run(state)
+    aaa_orders = [o for o in exit_orders if o.asset == "AAA"]
+    assert len(aaa_orders) == 2
+    assert all(o.leverage == 2.0 for o in aaa_orders)
+
+
+def test_genome_min_notional_usd_gates_sizing():
+    genome = _bracket_genome()
+    genome = Genome(**{**genome.__dict__, "min_notional_usd": 25.0})
+    trader = build_trader(genome)
+
+    # sizing gene's notional_long/notional_short (10.0 each) are now below the
+    # genome-hoisted min_notional_usd (25.0) -> no entry orders are emitted.
+    orders = trader.run(_release_state())
+    assert orders == []
+
+
+def test_genome_defaults_preserve_existing_behavior():
+    # leverage=1.0, min_notional_usd=10.0 defaults must reproduce the
+    # pre-hoist behavior exactly (existing tests above assert this already;
+    # this pins the default values themselves).
+    genome = Genome(
+        name="Defaults",
+        universe_filter=GeneSpec("all_tradable"),
+        signal=GeneSpec("rank"),
+        entry_timing=GeneSpec("release_bar"),
+        sizing=GeneSpec("fixed_notional"),
+        exit_rule=GeneSpec("bracket"),
+    )
+    assert genome.leverage == 1.0
+    assert genome.min_notional_usd == 10.0
+    trader = build_trader(genome)
+    orders = trader.run(_release_state())
+    assert orders
+    assert all(o.leverage == 1.0 for o in orders)
