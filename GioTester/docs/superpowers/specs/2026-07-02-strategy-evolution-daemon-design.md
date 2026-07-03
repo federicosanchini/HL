@@ -79,6 +79,8 @@ This is a deliberate, spec'd matching-behavior change with explicit approval —
 ### Phase T — Gene taxonomy v1 [S-M]
 The current combinatorial product is 2 genomes — there is nothing to sweep. Ship: `percent_of_equity` sizing (engine-independent — `AccountView.equity` already exposed; sequence its digests after Phase E's look-ahead fix); genome-level discrete `leverage` knob {1,2,3} + hoist `min_notional_usd`; 2–3 options per remaining slot (from the deferred "universe" brainstorm with the user — this phase has a user-input gate); trigger/limit-based genes register only if engine version ≥ Phase E. Gene-library version bumps the fingerprint.
 
+**Status: SHIPPED 2026-07-03** — kinds: universe{all_tradable} signal{rank, rank_30d, rank_cached, rank_30d_cached, momentum, funding_carry} timing{release_bar, delay} sizing{fixed_notional, percent_of_equity} exit{bracket, trailing, time_only}; knobs hoisted (leverage, min_notional_usd); pullback deferred to entry_filter slot (Gene-Author).
+
 ### Phase 1 — Batch evaluation & scoring [M] *(no LLM)*
 - **Task 1 = the real-data seam gate:** pytest running legacy SLTP_Bracket and its genome through `run_backtest` on real `../data/`, asserting `allclose` on equity curves (skip-if-data-missing). This was Phase 0's "manual verification" — now owned and mandatory. Re-run as Phase E's acceptance gate too.
 - **Prepared-SimData batch API:** `run_backtest_prepared(strategy, sim_data, bt_cfg)` — pure refactor; `prepare_sim_data` currently runs per call, which a sweep cannot afford. Persistent worker prep on 4c/8t Windows (spawn semantics); measure per-backtest wall time before fixing sweep size.

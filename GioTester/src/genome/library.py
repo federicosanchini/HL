@@ -139,7 +139,9 @@ class MomentumSignal:
 
     def score(self, state, universe: Set[str]) -> Dict[str, float]:
         out: Dict[str, float] = {}
-        for asset in universe:
+        for asset in state.market:
+            if asset not in universe:
+                continue
             dq = self._history.get(asset)
             if dq is None or len(dq) < self.lookback_bars + 1:
                 continue
@@ -249,6 +251,58 @@ class FixedNotionalSizing:
         if self.notional_short >= self.min_notional_usd:
             for asset in shorts:
                 _open(asset, -1, self.notional_short)
+        return orders
+
+
+@register("sizing", "percent_of_equity")
+class PercentOfEquitySizing:
+    """Open `pct` of current account equity as notional per selected asset.
+
+    Notional is recomputed every call from `state.account.equity` (not a fixed
+    USD amount) -- longs first, then shorts, same order convention as
+    FixedNotionalSizing. Per-asset notional below `min_notional_usd` is
+    skipped (that asset only; equity-derived notional is identical across
+    assets in a single call so this either skips all selections or none,
+    absent an equity change mid-call, which cannot happen since sizing is
+    computed once per bar).
+    """
+
+    def __init__(
+        self,
+        *,
+        pct: float = 0.005,
+        min_notional_usd: float = 10.0,
+        leverage: float = 1.0,
+        **_,
+    ) -> None:
+        self.pct = float(pct)
+        self.min_notional_usd = float(min_notional_usd)
+        self.leverage = float(leverage)
+
+    def orders_for(self, state, longs: List[str], shorts: List[str]) -> List[OrderCommand]:
+        orders: List[OrderCommand] = []
+        notional = self.pct * state.account.equity
+        if notional < self.min_notional_usd:
+            return orders
+
+        def _open(asset: str, side: int) -> None:
+            mv = state.market.get(asset)
+            if mv is None or not (math.isfinite(mv.mark_px) and mv.mark_px > 0):
+                return
+            orders.append(
+                OrderCommand(
+                    asset=asset,
+                    side=side,
+                    order_type=OrderType.MARKET.value,
+                    notional=notional,
+                    leverage=self.leverage,
+                )
+            )
+
+        for asset in longs:
+            _open(asset, 1)
+        for asset in shorts:
+            _open(asset, -1)
         return orders
 
 
@@ -424,4 +478,46 @@ class TrailingExit:
             orders.append(
                 _trigger_order(asset, pos.size, stop_px, "stop", self.leverage, f"{asset}:sl")
             )
+        return orders
+
+
+@register("exit_rule", "time_only")
+class TimeOnlyExit:
+    """Pure time-based exit: no triggers ever, market close at expiry.
+
+    R7 contract compliance is trivial here since the FULL desired trigger set
+    for this gene is always empty -- there is nothing to re-emit while the
+    position is held. At `bar_index - entry_bar >= expiry_bars`, emits a
+    single reduce-only MARKET full-size close (same helper/pattern as
+    BracketExit/TrailingExit expiry). min-notional-gated like the v1 exits.
+    """
+
+    def __init__(
+        self,
+        *,
+        expiry_bars: int = 240,
+        min_notional_usd: float = 10.0,
+        leverage: float = 1.0,
+        **_,
+    ) -> None:
+        self.expiry_bars = int(expiry_bars)
+        self.min_notional_usd = float(min_notional_usd)
+        self.leverage = float(leverage)
+
+    def exits(self, state, ledger: EntryLedger) -> List[OrderCommand]:
+        orders: List[OrderCommand] = []
+        for asset, pos in state.positions.items():
+            rec = ledger.get(asset)
+            mv = state.market.get(asset)
+            if rec is None or rec.price <= 0 or mv is None:
+                continue
+            mark_px = mv.mark_px
+            if not (math.isfinite(mark_px) and mark_px > 0):
+                continue
+            if abs(pos.size) * mark_px < self.min_notional_usd:
+                continue
+
+            expired = (state.bar_index - rec.bar_index) >= self.expiry_bars
+            if expired:
+                orders.append(_market_reduce_order(asset, pos.size, self.leverage))
         return orders
