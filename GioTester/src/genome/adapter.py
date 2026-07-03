@@ -67,6 +67,17 @@ class ComposedTrader:
 
     def run(self, state) -> List[OrderCommand]:
         self._ledger.prune(set(state.positions))
+        # R7 level anchoring: refresh each held position's ledger price from the
+        # realized entry_price (the actual open[i+1] fill) every bar. This is
+        # idempotent — entry_price only moves on adds/flips, which would reset
+        # exit-gene tracking anyway — so an unconditional per-bar refresh is
+        # simpler than tracking a "first observation" flag and behaves identically.
+        for asset, pos in state.positions.items():
+            rec = self._ledger.get(asset)
+            if rec is not None:
+                # `record()` overwrites in place; passing back the existing
+                # bar_index preserves the expiry anchor while refreshing price.
+                self._ledger.record(asset, rec.bar_index, pos.entry_price)
         orders: List[OrderCommand] = list(self._exit.exits(state, self._ledger))
         if self._timing.should_enter(state):
             universe = self._uf.eligible(state)

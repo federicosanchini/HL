@@ -1,6 +1,8 @@
 # tests/test_genome_adapter.py
 from __future__ import annotations
 
+import pytest
+
 import src.genome.library  # noqa: F401
 from src.genome.adapter import GeneSpec, Genome, build_trader, select_longs_shorts
 from strategy_harness import make_state, market_view, position_view
@@ -67,9 +69,33 @@ def test_run_no_entries_off_release():
 def test_run_exits_tracked_entry_on_tp():
     trader = build_trader(_bracket_genome())
     trader.run(_release_state())  # opens AAA long @100 (ledger records entry)
-    # next bar: AAA up 12% -> bracket take-profit exit
+    # next bar: AAA held; bracket re-emits its full SL+TP trigger set anchored
+    # to the realized entry_price (100.0), regardless of the current mark.
     market = {"AAA": market_view("AAA", 112.0)}
     positions = {"AAA": position_view("AAA", size=0.1, entry_price=100.0, mark_price=112.0)}
     state = make_state(bar_index=1, market=market, positions=positions, is_release=False)
     orders = trader.run(state)
-    assert any(o.asset == "AAA" and o.reduce_only for o in orders)
+
+    aaa_orders = [o for o in orders if o.asset == "AAA"]
+    assert len(aaa_orders) == 2
+    by_client = {o.client_id: o for o in aaa_orders}
+    sl, tp = by_client["AAA:sl"], by_client["AAA:tp"]
+
+    assert sl.order_type == "trigger" and sl.trigger_direction == "stop"
+    assert sl.side == -1 and sl.reduce_only and sl.size == 0.1
+    assert sl.trigger_px == pytest.approx(95.0)  # entry*(1-sl_pct)
+
+    assert tp.order_type == "trigger" and tp.trigger_direction == "tp"
+    assert tp.side == -1 and tp.reduce_only and tp.size == 0.1
+    assert tp.trigger_px == pytest.approx(110.0)  # entry*(1+tp_pct)
+
+
+def test_run_entry_decision_bar_emits_no_triggers():
+    # On the bar a position is opened, the position does not exist yet in
+    # state.positions (it fills next open, R1); the exit gene has nothing to
+    # anchor to, so only entry (market) orders are emitted -- no TRIGGER orders.
+    trader = build_trader(_bracket_genome())
+    orders = trader.run(_release_state())
+    assert orders  # entries were emitted
+    assert all(o.order_type != "trigger" for o in orders)
+    assert all(o.trigger_px is None and o.trigger_direction is None for o in orders)

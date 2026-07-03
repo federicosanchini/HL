@@ -92,7 +92,8 @@ class FixedNotionalSizing:
 from .genes import EntryLedger
 
 
-def _reduce_order(asset: str, size: float, leverage: float) -> OrderCommand:
+def _market_reduce_order(asset: str, size: float, leverage: float) -> OrderCommand:
+    """Full reduce-only market close, used for expiry (R7)."""
     return OrderCommand(
         asset=asset,
         side=-1 if size > 0 else 1,
@@ -103,16 +104,47 @@ def _reduce_order(asset: str, size: float, leverage: float) -> OrderCommand:
     )
 
 
-def _signed_ret(size: float, mark_px: float, entry_px: float) -> float:
-    side = 1.0 if size > 0 else -1.0
-    return side * (mark_px / entry_px - 1.0)
+def _trigger_order(
+    asset: str,
+    size: float,
+    trigger_px: float,
+    trigger_direction: str,
+    leverage: float,
+    client_id: str,
+) -> OrderCommand:
+    """Reduce-only trigger placement (R2). `size` is the SIGNED position size;
+    the trigger side is the opposite of the position (closes it)."""
+    return OrderCommand(
+        asset=asset,
+        side=-1 if size > 0 else 1,
+        order_type=OrderType.TRIGGER.value,
+        size=abs(size),
+        leverage=leverage,
+        reduce_only=True,
+        trigger_px=trigger_px,
+        trigger_direction=trigger_direction,
+        client_id=client_id,
+    )
 
 
 @register("exit_rule", "bracket")
 class BracketExit:
     """Symmetric-or-asymmetric stop/take-profit bracket with a time expiry.
 
-    tp_pct=inf -> stop-only; sl_pct=inf -> take-profit-only.
+    R7 contract: emits the FULL desired trigger set every bar a position exists
+    (the engine's per-asset replace rule, R2, makes re-emission idempotent).
+    tp_pct=inf -> stop-only; sl_pct=inf -> take-profit-only. Levels are anchored
+    to `ledger` (refreshed from PositionView.entry_price by the adapter, R7).
+
+    Expiry: once `bar_index - entry_bar >= expiry_bars`, this gene emits ONLY a
+    reduce-only MARKET close for that bar -- no trigger orders. R2's replace rule
+    only clears an asset's resting triggers when >=1 trigger order is emitted for
+    that asset THIS bar; emitting zero triggers on the expiry bar does NOT cancel
+    previously-resting SL/TP. That is accepted-and-documented v2 behavior: the
+    engine auto-cancels resting triggers the instant the position actually closes
+    (any path -- fill, liquidation, force-close), and in the worst case the
+    resting SL fires intrabar *before* the queued market exit fills next open,
+    which is still a protective, deterministic outcome (never a naked position).
     """
 
     def __init__(
@@ -140,20 +172,42 @@ class BracketExit:
             mark_px = mv.mark_px
             if not (math.isfinite(mark_px) and mark_px > 0):
                 continue
-            ret = _signed_ret(pos.size, mark_px, rec.price)
-            expired = (state.bar_index - rec.bar_index) >= self.expiry_bars
-            hit = ret <= -self.sl_pct or ret >= self.tp_pct
-            if not (hit or expired):
-                continue
             if abs(pos.size) * mark_px < self.min_notional_usd:
                 continue
-            orders.append(_reduce_order(asset, pos.size, self.leverage))
+
+            entry = rec.price
+            expired = (state.bar_index - rec.bar_index) >= self.expiry_bars
+            if expired:
+                orders.append(_market_reduce_order(asset, pos.size, self.leverage))
+                continue
+
+            long = pos.size > 0
+            if math.isfinite(self.sl_pct):
+                sl_px = entry * (1.0 - self.sl_pct) if long else entry * (1.0 + self.sl_pct)
+                orders.append(
+                    _trigger_order(asset, pos.size, sl_px, "stop", self.leverage, f"{asset}:sl")
+                )
+            if math.isfinite(self.tp_pct):
+                tp_px = entry * (1.0 + self.tp_pct) if long else entry * (1.0 - self.tp_pct)
+                orders.append(
+                    _trigger_order(asset, pos.size, tp_px, "tp", self.leverage, f"{asset}:tp")
+                )
         return orders
 
 
 @register("exit_rule", "trailing")
 class TrailingExit:
-    """Exit when price retraces `trail_pct` from the best favorable price seen."""
+    """Trailing stop that ratchets with the best favorable excursion seen.
+
+    R7 contract: peak/trough is tracked from `mv.high_px` (long) / `mv.low_px`
+    (short) -- not mark_px -- so an intrabar wick is captured even if the bar
+    closes off the extreme. Monotonic per asset, seeded from the ledger's entry
+    price on first observation. Re-emits a single stop trigger at
+    `peak*(1-trail_pct)` (long) / `trough*(1+trail_pct)` (short) every bar (R2
+    replace makes re-emission idempotent). Expiry follows the same
+    market-only-close pattern as BracketExit (see its docstring for the
+    trigger-coexistence rationale).
+    """
 
     def __init__(
         self,
@@ -167,14 +221,15 @@ class TrailingExit:
         self.expiry_bars = int(expiry_bars)
         self.min_notional_usd = float(min_notional_usd)
         self.leverage = float(leverage)
-        self._peak_ret: Dict[str, float] = {}
+        self._peak_px: Dict[str, float] = {}
 
     def exits(self, state, ledger: EntryLedger) -> List[OrderCommand]:
         orders: List[OrderCommand] = []
         live = set(state.positions)
-        for asset in list(self._peak_ret):
+        for asset in list(self._peak_px):
             if asset not in live:
-                del self._peak_ret[asset]
+                del self._peak_px[asset]
+
         for asset, pos in state.positions.items():
             rec = ledger.get(asset)
             mv = state.market.get(asset)
@@ -183,14 +238,26 @@ class TrailingExit:
             mark_px = mv.mark_px
             if not (math.isfinite(mark_px) and mark_px > 0):
                 continue
-            ret = _signed_ret(pos.size, mark_px, rec.price)
-            peak = max(self._peak_ret.get(asset, ret), ret)
-            self._peak_ret[asset] = peak
-            expired = (state.bar_index - rec.bar_index) >= self.expiry_bars
-            retraced = (peak - ret) >= self.trail_pct
-            if not (retraced or expired):
-                continue
+
+            long = pos.size > 0
+            if asset not in self._peak_px:
+                self._peak_px[asset] = rec.price  # seed from ledger entry on first observation
+            if long:
+                self._peak_px[asset] = max(self._peak_px[asset], mv.high_px)
+            else:
+                self._peak_px[asset] = min(self._peak_px[asset], mv.low_px)
+            peak = self._peak_px[asset]
+
             if abs(pos.size) * mark_px < self.min_notional_usd:
                 continue
-            orders.append(_reduce_order(asset, pos.size, self.leverage))
+
+            expired = (state.bar_index - rec.bar_index) >= self.expiry_bars
+            if expired:
+                orders.append(_market_reduce_order(asset, pos.size, self.leverage))
+                continue
+
+            stop_px = peak * (1.0 - self.trail_pct) if long else peak * (1.0 + self.trail_pct)
+            orders.append(
+                _trigger_order(asset, pos.size, stop_px, "stop", self.leverage, f"{asset}:sl")
+            )
         return orders
