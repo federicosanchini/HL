@@ -1,31 +1,39 @@
-"""
-Backtester entry-point. Runs HODL10_reset, HODL30_reset, gap_HODL10, prints metric tables.
-
-Confidence: HIGH (orchestration only)
-"""
+"""Backtester entry-point. Loads every standalone strategy in traders/."""
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 
-from src.config import BacktestConfig, DataConfig  # noqa: E402
-from src.data_loader import DataLoader  # noqa: E402
-from src.simulator import run_backtest, log_results, print_result_summary  # noqa: E402
-import src.strategies as strat
+from src import (
+    BacktestConfig,
+    DataConfig,
+    DataLoader,
+    log_results,
+    print_result_summary,
+    run_backtest_from_trader_file,
+)
 
 # ——— constants ———
 INITIAL_EQUITY = 2000.0
-N = 3
+N = 2
 LEVERAGE = 1.0
 NOTIONAL_LONG = 10.0
 NOTIONAL_SHORT = 10.0
 FEE_BPS = 4.5
-GAP_BPS = 50.0
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
+TRADERS_DIR = Path(__file__).resolve().parent / "traders"
+
+
+def discover_trader_files() -> list[Path]:
+    files = sorted(
+        p for p in TRADERS_DIR.glob("*.py")
+        if p.is_file() and not p.name.startswith("_")
+    )
+    if not files:
+        raise FileNotFoundError(f"no strategy files found in {TRADERS_DIR}")
+    return files
 
 
 def main() -> None:
@@ -50,7 +58,7 @@ def main() -> None:
         taker_fee_bps=FEE_BPS,
     )
 
-    _shared = dict(
+    shared = dict(
         n=N,
         leverage=LEVERAGE,
         notional_long=NOTIONAL_LONG,
@@ -61,20 +69,16 @@ def main() -> None:
         bars_per_day=bt_cfg.bars_per_day,
     )
 
-    strategies = [
-        strat.HODL10(**_shared),
-        strat.HODL30(**_shared),
-        strat.HODL10_reset(**_shared),
-        strat.HODL30_reset(**_shared),
-        strat.HODL10_exp(**_shared),
-        strat.HODL30_exp(**_shared),
-    ]
-
-    for strategy in strategies:
-        result = run_backtest(
-            strategy, market, str(cfg.ranks_path), bt_cfg, verbose=True
+    for trader_path in discover_trader_files():
+        result = run_backtest_from_trader_file(
+            str(trader_path),
+            market,
+            str(cfg.ranks_path),
+            bt_cfg,
+            verbose=True,
+            **shared,
         )
-        out = RESULTS_DIR / f"{strategy.name}.json"
+        out = RESULTS_DIR / f"{trader_path.stem}.json"
         log_results(result, str(out))
         print_result_summary(result, str(out))
 

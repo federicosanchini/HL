@@ -18,7 +18,7 @@ class DataConfig:
     prediction_col: Optional[str] = None
     symbol_col: Optional[str] = None
     date_col: Optional[str] = None
-    min_prediction_rows_per_day: int = 2
+    min_prediction_rows_p8er_day: int = 2
 
     # --- Date window ---
     # Market data is clipped to [start_date, end_exclusive).
@@ -31,11 +31,6 @@ class DataConfig:
     # --- Signal selection ---
     n_long: int = 3
     n_short: int = 3
-
-    # --- Trade scheduling ---
-    entry_hour_utc: int = 0
-    max_entry_delay_hours: int = 23
-    execution_price_col: str = "open"
 
 
 @dataclass
