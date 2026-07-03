@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -38,6 +38,10 @@ class SimResult:
     total_fees: float = 0.0
     margin_mode: str = "cross"
     engine_semantics_version: int = 2
+    # Per-perp, per-bar maintenance margin (Task P1). Additive/internal only --
+    # not serialized by log_results (schema v5 is unchanged); consumed by
+    # src/evolution/scoring.py's exact margin-headroom calc (Task P2).
+    per_perp_maintenance: Dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def log_results(result: SimResult, path: str) -> None:

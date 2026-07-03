@@ -351,8 +351,12 @@ class BracketExit:
 
     R7 contract: emits the FULL desired trigger set every bar a position exists
     (the engine's per-asset replace rule, R2, makes re-emission idempotent).
-    tp_pct=inf -> stop-only; sl_pct=inf -> take-profit-only. Levels are anchored
-    to `ledger` (refreshed from PositionView.entry_price by the adapter, R7).
+    tp_pct=inf -> stop-only; sl_pct=inf -> take-profit-only. `sl_pct`/`tp_pct`
+    also accept `None` as a JSON-legal spelling of a disabled leg (Task P1 --
+    the sweep generator serializes disabled legs as `null`, never `inf`); it is
+    mapped to `math.inf` internally and the two spellings behave identically.
+    Levels are anchored to `ledger` (refreshed from PositionView.entry_price by
+    the adapter, R7).
 
     Expiry: once `bar_index - entry_bar >= expiry_bars`, this gene emits ONLY a
     reduce-only MARKET close for that bar -- no trigger orders. R2's replace rule
@@ -368,14 +372,14 @@ class BracketExit:
     def __init__(
         self,
         *,
-        sl_pct: float = 0.05,
-        tp_pct: float = 0.10,
+        sl_pct: Optional[float] = 0.05,
+        tp_pct: Optional[float] = 0.10,
         expiry_bars: int = 240,
         min_notional_usd: float = 10.0,
         leverage: float = 1.0,
     ) -> None:
-        self.sl_pct = float(sl_pct)
-        self.tp_pct = float(tp_pct)
+        self.sl_pct = math.inf if sl_pct is None else float(sl_pct)
+        self.tp_pct = math.inf if tp_pct is None else float(tp_pct)
         self.expiry_bars = int(expiry_bars)
         self.min_notional_usd = float(min_notional_usd)
         self.leverage = float(leverage)

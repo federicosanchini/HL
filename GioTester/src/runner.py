@@ -242,6 +242,7 @@ def run_backtest_prepared(
     eq_matrix = np.zeros((n_perps, n_bars))
     pos_matrix = np.zeros((n_perps, n_bars))
     pos_qty_matrix = np.zeros((n_perps, n_bars))
+    maint_matrix = np.zeros((n_perps, n_bars))
     total_eq = np.zeros(n_bars)
 
     fee_bps = bt_cfg.taker_fee_bps
@@ -310,6 +311,7 @@ def run_backtest_prepared(
             contrib[j] += pos.unrealized_pnl
             pos_matrix[j, i] = pos.signed_invested_notional
             pos_qty_matrix[j, i] = pos.size
+            maint_matrix[j, i] = pos.maintenance_margin
 
         eq_matrix[:, i] = contrib
         total_eq[i] = bucket.account_equity()
@@ -317,6 +319,7 @@ def run_backtest_prepared(
     per_perp_eq = {p: eq_matrix[perp_idx[p]] for p in sd.perps}
     per_perp_position = {p: pos_matrix[perp_idx[p]] for p in sd.perps}
     per_perp_position_qty = {p: pos_qty_matrix[perp_idx[p]] for p in sd.perps}
+    per_perp_maintenance = {p: maint_matrix[perp_idx[p]] for p in sd.perps}
 
     metrics_total = series_metrics(total_eq, bt_cfg.initial_equity, bt_cfg.annualization)
     metrics_per_perp: Dict[str, Dict[str, float]] = {}
@@ -351,6 +354,7 @@ def run_backtest_prepared(
         per_perp_equity=per_perp_eq,
         per_perp_position=per_perp_position,
         per_perp_position_qty=per_perp_position_qty,
+        per_perp_maintenance=per_perp_maintenance,
         liquidation_events=bucket.liquidation_events,
         execution_events=bucket.execution_events,
         rejected_orders=bucket.rejected_orders,

@@ -104,6 +104,34 @@ class ComposedTrader:
         return orders
 
 
+# Task P1: `delay` timing only fires on non-release bars, where
+# `state.current_ranks_row` is None; the plain (non-cached) rank signals read
+# that row directly and return {} off-release (see library.py's module
+# docstring), so this composition can never emit an entry. Enforced here (not
+# just documented) so build_trader raises loudly instead of silently building
+# a zero-trade genome.
+_INVALID_TIMING_SIGNAL_PAIRS = {
+    ("delay", "rank"),
+    ("delay", "rank_30d"),
+}
+
+
+def validate_genome(genome: Genome) -> None:
+    """Raise ValueError on a structurally-invalid gene composition.
+
+    Currently the sole invariant: `entry_timing=delay` requires a cached rank
+    signal (`rank_cached`/`rank_30d_cached`) or a non-rank signal (`momentum`,
+    `funding_carry`) -- never plain `rank`/`rank_30d`.
+    """
+    pair = (genome.entry_timing.kind, genome.signal.kind)
+    if pair in _INVALID_TIMING_SIGNAL_PAIRS:
+        raise ValueError(
+            f"invalid genome composition: entry_timing={genome.entry_timing.kind!r} "
+            "requires a cached rank signal (rank_cached/rank_30d_cached) or a "
+            f"non-rank signal (momentum/funding_carry); got signal={genome.signal.kind!r}"
+        )
+
+
 def _merged_params(genome: Genome, spec: GeneSpec) -> dict:
     """Merge genome-level knobs into a slot's params (genome overrides on collision)."""
     return {
@@ -114,6 +142,7 @@ def _merged_params(genome: Genome, spec: GeneSpec) -> dict:
 
 
 def build_trader(genome: Genome) -> ComposedTrader:
+    validate_genome(genome)
     uf = build_gene(
         "universe_filter", genome.universe_filter.kind, _merged_params(genome, genome.universe_filter)
     )
